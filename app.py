@@ -336,12 +336,14 @@ with col_right:
     st.subheader(f"🔍 Preview ({len(ordered_images)} ภาพ)")
     n_cols = min(4, len(ordered_images))
     rows = [ordered_images[i:i + n_cols] for i in range(0, len(ordered_images), n_cols)]
+    total_imgs = len(ordered_images)
 
-    for row in rows:
+    for row_idx, row in enumerate(rows):
         cols = st.columns(n_cols)
         for j, (name, img) in enumerate(row):
+            global_idx = row_idx * n_cols + j
             with cols[j]:
-                idx = st.session_state.image_order.index(name) + 1
+                idx = global_idx + 1
                 # Colored position badge
                 st.markdown(
                     f'<div style="text-align:center;">'
@@ -356,6 +358,22 @@ with col_right:
                     f'<div class="img-meta">{name}<br>{img.width}×{img.height} px | {img.mode}</div>',
                     unsafe_allow_html=True,
                 )
+                # Move left / right buttons
+                bl, br = st.columns(2)
+                if bl.button("◀", key=f"mv_l_{global_idx}",
+                             help="ย้ายไปก่อนหน้า",
+                             use_container_width=True,
+                             disabled=(global_idx == 0)):
+                    o = st.session_state.image_order
+                    o[global_idx], o[global_idx - 1] = o[global_idx - 1], o[global_idx]
+                    st.rerun()
+                if br.button("▶", key=f"mv_r_{global_idx}",
+                             help="ย้ายไปถัดไป",
+                             use_container_width=True,
+                             disabled=(global_idx == total_imgs - 1)):
+                    o = st.session_state.image_order
+                    o[global_idx], o[global_idx + 1] = o[global_idx + 1], o[global_idx]
+                    st.rerun()
 
 
 # ─── Metrics & Generate ───────────────────────────────────────────────────────
