@@ -300,9 +300,9 @@ with col_left:
     if HAS_SORTABLES:
         st.caption("↕️ ลากเพื่อเปลี่ยนลำดับ")
         labeled = [f"{i+1}. {name}" for i, name in enumerate(st.session_state.image_order)]
-        # Key changes whenever the FILE SET changes → forces component to re-init with all files
-        files_sig = abs(hash("_".join(sorted(images_dict.keys()))))
-        sorted_labeled = sort_items(labeled, direction="vertical", key=f"img_sorter_{files_sig}")
+        # Key changes when ORDER changes → forces re-init so numbers always match position
+        order_sig = abs(hash("_".join(st.session_state.image_order)))
+        sorted_labeled = sort_items(labeled, direction="vertical", key=f"img_sorter_{order_sig}")
         st.session_state.image_order = [item.split(". ", 1)[1] for item in sorted_labeled]
     else:
         st.caption("ใช้ปุ่ม ↑ ↓ เพื่อเปลี่ยนลำดับ")
