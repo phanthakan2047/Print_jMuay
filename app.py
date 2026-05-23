@@ -246,6 +246,9 @@ SUPPORTED_TYPES = [
 
 col_left, col_right = st.columns([1, 2], gap="large")
 
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
+
 with col_left:
     st.subheader("📁 อัปโหลดภาพ")
     st.caption(f"รองรับ: {', '.join(f'.{t}' for t in SUPPORTED_TYPES)}")
@@ -254,7 +257,12 @@ with col_left:
         accept_multiple_files=True,
         type=SUPPORTED_TYPES,
         label_visibility="collapsed",
+        key=f"uploader_{st.session_state.uploader_key}",
     )
+    if uploaded_files and st.button("🗑️ ลบภาพทั้งหมด", use_container_width=True):
+        st.session_state.uploader_key += 1
+        st.session_state.image_order = []
+        st.rerun()
 
 if not uploaded_files:
     st.info("👆 กรุณาอัปโหลดภาพอย่างน้อย 1 ไฟล์เพื่อเริ่มต้น")
