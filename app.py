@@ -181,6 +181,13 @@ def _delete_all_sessions() -> str:
 
 
 
+def _sessions_to_choices(sessions: list) -> list:
+    return [
+        (f"{(s.get('created_at','')[:16].replace('T',' '))} — {len(s.get('image_names',[]))} ภาพ", s["id"])
+        for s in sessions
+    ]
+
+
 def _render_history_html(sessions: list) -> str:
     if not db:
         return ("<div style='padding:12px;background:#2d1a00;border:1px solid #c05621;"
@@ -190,11 +197,8 @@ def _render_history_html(sessions: list) -> str:
                 "ตรวจสอบ SUPABASE_URL และ SUPABASE_KEY ใน environment variables</p></div>")
     if not sessions:
         return "<p style='color:#888;padding:8px;text-align:center;'>ยังไม่มีประวัติที่บันทึกไว้</p>"
-    uid = abs(hash(str([s["id"] for s in sessions]))) % 999999
-    container_id = f"hlist{uid}"
     items = []
     for s in sessions:
-        sid = s["id"]
         created = (s.get("created_at") or "")[:16].replace("T", " ")
         names = s.get("image_names") or []
         thumbs = s.get("thumbnails") or {}
@@ -206,49 +210,19 @@ def _render_history_html(sessions: list) -> str:
         )
         if count > 6:
             thumb_html += f'<span style="color:#a0aec0;font-size:11px;align-self:center;">+{count-6}</span>'
-        safe_confirm = f"ลบ session {created}?".replace('"', "&quot;")
         items.append(
-            f'<div style="background:#1a2a3a;border-radius:8px;padding:10px;margin-bottom:8px;'
+            f'<div style="background:#1a2a3a;border-radius:8px;padding:8px 10px;margin-bottom:6px;'
             f'border:1px solid #2d4a6b;">'
-            f'<div style="display:flex;align-items:flex-start;gap:8px;">'
-            f'<div style="flex:1;min-width:0;">'
-            f'<div style="color:#e2e8f0;font-size:12px;font-weight:600;">🕐 {created}'
-            f' &nbsp;<span style="color:#63b3ed;">{count} ภาพ</span></div>'
-            f'<div style="display:flex;gap:3px;margin-top:5px;flex-wrap:wrap;">{thumb_html}</div>'
+            f'<div style="color:#e2e8f0;font-size:12px;font-weight:600;margin-bottom:4px;">'
+            f'🕐 {created} &nbsp;<span style="color:#63b3ed;">{count} ภาพ</span></div>'
+            f'<div style="display:flex;gap:3px;flex-wrap:wrap;">{thumb_html}</div>'
             f'</div>'
-            f'<div style="display:flex;gap:5px;flex-shrink:0;margin-top:2px;">'
-            f'<button data-hist-action="restore" data-hist-sid="{sid}"'
-            f' style="padding:4px 10px;background:#1a56a0;color:white;border:none;'
-            f'border-radius:6px;font-size:12px;cursor:pointer;">📂 โหลด</button>'
-            f'<button data-hist-action="del" data-hist-sid="{sid}" data-hist-confirm="{safe_confirm}"'
-            f' style="padding:4px 10px;background:#9b2335;color:white;border:none;'
-            f'border-radius:6px;font-size:12px;cursor:pointer;">🗑️</button>'
-            f'</div></div></div>'
         )
     cnt = len(sessions)
     warn_style = "color:#f6ad55;" if cnt >= SESSION_LIMIT - 3 else "color:#a0aec0;"
-    header = (f"<p style='{warn_style}font-size:12px;margin-bottom:8px;'>"
+    header = (f"<p style='{warn_style}font-size:12px;margin-bottom:6px;'>"
               f"{'⚠️ ใกล้เต็ม! ' if cnt >= SESSION_LIMIT - 3 else ''}ประวัติ {cnt} / {SESSION_LIMIT}</p>")
-    script = (
-        f"<img src='xhi{uid}' onerror=\"(function(){{"
-        f"var c=document.getElementById('{container_id}');"
-        f"if(!c||c._hi)return;c._hi=true;"
-        f"c.addEventListener('click',function(e){{"
-        f"var btn=e.target.closest('[data-hist-action]');"
-        f"if(!btn)return;"
-        f"var act=btn.dataset.histAction;"
-        f"var sid=btn.dataset.histSid;"
-        f"var cm=btn.dataset.histConfirm;"
-        f"if(cm&&!confirm(cm))return;"
-        f"var w=document.getElementById('sort_order_input');"
-        f"var t=w&&(w.querySelector('textarea')||w.querySelector('input'));"
-        f"if(t){{t.value='__HIST_'+act.toUpperCase()+'__:'+sid+'_'+Date.now();"
-        f"t.dispatchEvent(new Event('input',{{bubbles:true}}));"
-        f"t.dispatchEvent(new Event('change',{{bubbles:true}}));}}"
-        f"}});"
-        f"}})()\" style='display:none'/>"
-    )
-    return script + header + f"<div id='{container_id}'>" + "".join(items) + "</div>"
+    return header + "".join(items)
 
 
 # ── Image helpers ─────────────────────────────────────────────────────────────
@@ -326,36 +300,12 @@ def _render_sortable_html(order: list) -> str:
 
 
 def on_sort_change(new_order_json, images_state, order_state, current_files):
-    _no_change = (gr.update(), order_state, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update())
+    _no_change = (gr.update(), order_state, gr.update(), gr.update(), gr.update(), gr.update(), gr.update())
     if not new_order_json:
         return _no_change
     if new_order_json.startswith("__DEL__:"):
         name = new_order_json[8:].rsplit('_', 1)[0]
-        return on_remove_by_name(name, images_state, order_state, current_files) + (gr.update(), gr.update())
-    if new_order_json.startswith("__HIST_RESTORE__:"):
-        sid = int(new_order_json[17:].rsplit('_', 1)[0])
-        new_images, new_order, msg = _restore_session(sid)
-        if new_images is None:
-            status = f"<p style='color:#c53030;font-size:13px;'>{msg}</p>"
-            return (gr.update(), order_state, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), status, gr.update())
-        sessions = _load_sessions() if db else []
-        status = f"<p style='color:#68d391;font-size:13px;'>{msg}</p>"
-        return (new_images, new_order,
-                _render_sortable_html(new_order),
-                _render_sortable_gallery_html(new_images, new_order),
-                gr.update(choices=new_order, value=new_order[0] if new_order else None),
-                _PRINT_STALE_HTML, gr.update(),
-                status, _render_history_html(sessions))
-    if new_order_json.startswith("__HIST_DEL__:"):
-        sid = int(new_order_json[13:].rsplit('_', 1)[0])
-        msg = _delete_session(sid)
-        try:
-            sessions = _load_sessions() if db else []
-        except Exception:
-            sessions = []
-        color = "c53030" if "❌" in msg else "68d391"
-        status = f"<p style='color:#{color};font-size:13px;'>{msg}</p>"
-        return (gr.update(), order_state, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), status, _render_history_html(sessions))
+        return on_remove_by_name(name, images_state, order_state, current_files)
     try:
         new_order = json.loads(new_order_json)
         new_order = [n for n in new_order if n in (images_state or {})]
@@ -363,8 +313,7 @@ def on_sort_change(new_order_json, images_state, order_state, current_files):
             return _no_change
         return (gr.update(), new_order, _render_sortable_html(new_order),
                 _render_sortable_gallery_html(images_state, new_order),
-                gr.update(choices=new_order), _PRINT_STALE_HTML, gr.update(),
-                gr.update(), gr.update())
+                gr.update(choices=new_order), _PRINT_STALE_HTML, gr.update())
     except Exception:
         return _no_change
 
@@ -978,14 +927,14 @@ def on_history_action(action_json, images_state, order_state, auto_delete):
     try:
         payload = json.loads(action_json)
     except Exception:
-        return gr.update(), history_html, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+        return gr.update(), history_html, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
 
     action = payload.get("action")
 
     if action == "save":
         settings = payload.get("settings", {})
         if not images_state:
-            return gr.update(), history_html, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+            return gr.update(), history_html, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
         try:
             msg = _save_session(images_state, order_state or [], settings, bool(auto_delete))
         except Exception as e:
@@ -996,33 +945,7 @@ def on_history_action(action_json, images_state, order_state, auto_delete):
             sessions = []
         color = "f6ad55" if "⚠️" in msg else ("c53030" if "❌" in msg else "68d391")
         status = f"<p style='color:#{color};font-size:13px;'>{msg}</p>"
-        return status, _render_history_html(sessions), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
-
-    elif action == "restore":
-        sid = int(payload.get("id", 0))
-        new_images, new_order, msg = _restore_session(sid)
-        if new_images is None:
-            status = f"<p style='color:#c53030;font-size:13px;'>{msg}</p>"
-            return status, history_html, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
-        status = f"<p style='color:#68d391;font-size:13px;'>{msg}</p>"
-        return (status, history_html,
-                new_images, new_order,
-                _render_sortable_html(new_order),
-                _render_sortable_gallery_html(new_images, new_order),
-                gr.update(choices=new_order, value=new_order[0] if new_order else None),
-                _PRINT_STALE_HTML)
-
-    elif action == "delete":
-        sid = int(payload.get("id", 0))
-        msg = _delete_session(sid)
-        try:
-            sessions = _load_sessions()
-        except Exception as e:
-            sessions = []
-            msg += f" (โหลดใหม่ไม่สำเร็จ: {e})"
-        color = "c53030" if "❌" in msg else "68d391"
-        status = f"<p style='color:#{color};font-size:13px;'>{msg}</p>"
-        return status, _render_history_html(sessions), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+        return status, _render_history_html(sessions), gr.update(choices=_sessions_to_choices(sessions)), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
 
     elif action == "delete_all":
         msg = _delete_all_sessions()
@@ -1032,24 +955,25 @@ def on_history_action(action_json, images_state, order_state, auto_delete):
             sessions = []
         color = "c53030" if "❌" in msg else "68d391"
         status = f"<p style='color:#{color};font-size:13px;'>{msg}</p>"
-        return status, _render_history_html(sessions), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+        return status, _render_history_html(sessions), gr.update(choices=[], value=None), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
 
     elif action == "refresh":
         if not db:
             status = "<p style='color:#f6ad55;font-size:13px;'>⚠️ ไม่ได้เชื่อมต่อ Supabase — ตรวจสอบ SUPABASE_URL / SUPABASE_KEY</p>"
-            return status, _render_history_html([]), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+            return status, _render_history_html([]), gr.update(choices=[], value=None), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
         try:
             sessions = _load_sessions()
             if sessions:
                 status = f"<p style='color:#68d391;font-size:13px;'>✅ โหลดประวัติสำเร็จ ({len(sessions)} รายการ)</p>"
             else:
                 status = "<p style='color:#a0aec0;font-size:13px;'>📭 ยังไม่มีประวัติ — ลองกดดาวน์โหลดไฟล์ก่อน แล้วรีเฟรชอีกครั้ง</p>"
-            return status, _render_history_html(sessions), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+            choices = _sessions_to_choices(sessions)
+            return status, _render_history_html(sessions), gr.update(choices=choices), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
         except Exception as e:
             status = f"<p style='color:#c53030;font-size:13px;'>❌ โหลดไม่สำเร็จ: {e}</p>"
-            return status, _render_history_html([]), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+            return status, _render_history_html([]), gr.update(choices=[], value=None), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
 
-    return gr.update(), history_html, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+    return gr.update(), history_html, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
 
 
 # ── Gradio UI ─────────────────────────────────────────────────────────────────
@@ -1140,9 +1064,6 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
             print_html = gr.HTML("<p style='color:#888;'>กดปุ่มด้านบนเพื่อเตรียมพิมพ์</p>")
 
             gr.Markdown("---")
-            history_action_input = gr.Textbox(
-                visible=False, elem_id="history_action_input", label="history_action"
-            )
             with gr.Accordion("📚 ประวัติ (Sessions)", open=False):
                 with gr.Row():
                     btn_refresh_history = gr.Button("🔄 รีเฟรช", size="sm")
@@ -1153,6 +1074,13 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
                 )
                 history_status = gr.HTML()
                 history_html_out = gr.HTML(_render_history_html([]))
+                session_select_dd = gr.Dropdown(
+                    choices=[], label="เลือก session ที่ต้องการ",
+                    interactive=True, allow_custom_value=False,
+                )
+                with gr.Row():
+                    btn_load_session = gr.Button("📂 โหลด session ที่เลือก", size="sm")
+                    btn_del_session = gr.Button("🗑️ ลบที่เลือก", size="sm", variant="stop")
 
     # ── Event wiring ──────────────────────────────────────────────────────────
     use_unsharp.change(lambda v: gr.update(visible=v), use_unsharp, unsharp_group)
@@ -1171,8 +1099,7 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
     sort_order_input.change(
         on_sort_change,
         [sort_order_input, images_state, order_state, file_input],
-        [images_state, order_state, order_html, gallery, select_img, print_html, file_input,
-         history_status, history_html_out],
+        [images_state, order_state, order_html, gallery, select_img, print_html, file_input],
     )
 
     _move_outs = [order_state, order_html, gallery, select_img, print_html]
@@ -1209,24 +1136,59 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
     )
 
     # History wiring
-    _hist_outs = [history_status, history_html_out,
+    _hist_outs = [history_status, history_html_out, session_select_dd,
                   images_state, order_state, order_html, gallery, select_img, print_html]
 
     def _refresh_click(images_state, order_state, auto_delete):
-        payload = json.dumps({"action": "refresh"})
-        return on_history_action(payload, images_state, order_state, auto_delete)
+        return on_history_action(json.dumps({"action": "refresh"}), images_state, order_state, auto_delete)
 
-    def _delete_all_click(images_state, order_state, auto_delete):
-        payload = json.dumps({"action": "delete_all"})
-        return on_history_action(payload, images_state, order_state, auto_delete)
+    def _delete_all_click(auto_delete):
+        return on_history_action(json.dumps({"action": "delete_all"}), {}, [], auto_delete)
+
+    def _load_session_click(sid, images_state, order_state):
+        _no = (gr.update(),) * 9
+        if sid is None:
+            return ("<p style='color:#f6ad55;font-size:13px;'>⚠️ กรุณาเลือก session ก่อน</p>",) + _no[1:]
+        try:
+            new_images, new_order, msg = _restore_session(int(sid))
+        except Exception as e:
+            return (f"<p style='color:#c53030;font-size:13px;'>❌ {e}</p>",) + _no[1:]
+        if new_images is None:
+            return (f"<p style='color:#c53030;font-size:13px;'>{msg}</p>",) + _no[1:]
+        try:
+            sessions = _load_sessions()
+        except Exception:
+            sessions = []
+        status = f"<p style='color:#68d391;font-size:13px;'>{msg}</p>"
+        return (status, _render_history_html(sessions),
+                gr.update(choices=_sessions_to_choices(sessions)),
+                new_images, new_order,
+                _render_sortable_html(new_order),
+                _render_sortable_gallery_html(new_images, new_order),
+                gr.update(choices=new_order, value=new_order[0] if new_order else None),
+                _PRINT_STALE_HTML)
+
+    def _del_session_click(sid):
+        _no = (gr.update(),) * 9
+        if sid is None:
+            return ("<p style='color:#f6ad55;font-size:13px;'>⚠️ กรุณาเลือก session ก่อน</p>",) + _no[1:]
+        try:
+            msg = _delete_session(int(sid))
+            sessions = _load_sessions()
+        except Exception as e:
+            msg = f"❌ {e}"
+            sessions = []
+        color = "c53030" if "❌" in msg else "68d391"
+        status = f"<p style='color:#{color};font-size:13px;'>{msg}</p>"
+        choices = _sessions_to_choices(sessions)
+        return (status, _render_history_html(sessions),
+                gr.update(choices=choices, value=None),
+                gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update())
 
     btn_refresh_history.click(_refresh_click, [images_state, order_state, auto_delete_cb], _hist_outs)
-    btn_delete_all_sessions.click(_delete_all_click, [images_state, order_state, auto_delete_cb], _hist_outs)
-    history_action_input.change(
-        on_history_action,
-        [history_action_input, images_state, order_state, auto_delete_cb],
-        _hist_outs,
-    )
+    btn_delete_all_sessions.click(_delete_all_click, [auto_delete_cb], _hist_outs)
+    btn_load_session.click(_load_session_click, [session_select_dd, images_state, order_state], _hist_outs)
+    btn_del_session.click(_del_session_click, [session_select_dd], _hist_outs)
 
 
 if __name__ == "__main__":
