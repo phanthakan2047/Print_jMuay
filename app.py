@@ -1078,6 +1078,9 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
             print_html = gr.HTML("<p style='color:#888;'>กดปุ่มด้านบนเพื่อเตรียมพิมพ์</p>")
 
             gr.Markdown("---")
+            history_action_input = gr.Textbox(
+                visible=False, elem_id="history_action_input", label="history_action"
+            )
             with gr.Accordion("📚 ประวัติ (Sessions)", open=False):
                 with gr.Row():
                     btn_refresh_history = gr.Button("🔄 รีเฟรช", size="sm")
@@ -1085,9 +1088,6 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
                 auto_delete_cb = gr.Checkbox(
                     label="ลบประวัติเก่าสุดอัตโนมัติเมื่อเต็ม (ไม่ถาม)",
                     value=False,
-                )
-                history_action_input = gr.Textbox(
-                    visible=False, elem_id="history_action_input", label="history_action"
                 )
                 history_status = gr.HTML()
                 history_html_out = gr.HTML(_render_history_html([]))
