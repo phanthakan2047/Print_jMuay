@@ -634,7 +634,7 @@ def clear_all():
 
 def generate(
     images_state, order_state,
-    output_format, output_name,
+    output_format,
     sharpen, contrast_val, use_unsharp,
     unsharp_radius, unsharp_pct, unsharp_thresh,
     pdf_quality, pdf_page_size,
@@ -657,7 +657,7 @@ def generate(
         for _, img in ordered
     ]
 
-    fname = (output_name or "merged_images").strip()
+    fname = "merged_images"
     enh_parts = []
     if sharpen != 1.0: enh_parts.append(f"sharpness×{sharpen:.1f}")
     if contrast_val != 1.0: enh_parts.append(f"contrast×{contrast_val:.1f}")
@@ -807,13 +807,21 @@ def generate(
             f"<div style='{_grid}'>" + "".join(thumb_items) + "</div>"
         )
 
-    status_html = f"""
-<p style='color:#276749;font-weight:600;margin-bottom:8px;'>{msg} ({size_kb:.0f} KB)</p>
-<a href="data:{mime};base64,{b64_file}" download="{fname}.{ext}"
-   style="display:inline-block;padding:11px 28px;background:#276749;color:white;
-   text-decoration:none;border-radius:8px;font-weight:bold;font-size:15px;">
-   📥 ดาวน์โหลด {fname}.{ext}
-</a>"""
+    status_html = (
+        f"<p style='color:#276749;font-weight:600;margin-bottom:8px;'>{msg} ({size_kb:.0f} KB)</p>"
+        f"<a id='dl_link' href='data:{mime};base64,{b64_file}' style='display:none'>.</a>"
+        "<div style='display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;'>"
+        "<input id='dl_name' type='text' value='merged_images' placeholder='ชื่อไฟล์ (ไม่ต้องใส่นามสกุล)'"
+        " style='padding:8px 12px;border-radius:6px;border:1px solid #2d4a6b;"
+        "background:#1a2a3a;color:#e2e8f0;font-size:14px;flex:1;min-width:160px;'>"
+        "<button"
+        " onclick=\"(function(){var n=document.getElementById('dl_name').value.trim()||'merged_images';"
+        f"if(!n.toLowerCase().endsWith('.{ext}'))n+='.{ext}';"
+        "var a=document.getElementById('dl_link');a.download=n;a.click();})()\""
+        " style='padding:11px 24px;background:#276749;color:white;border:none;"
+        "border-radius:8px;font-weight:bold;font-size:15px;cursor:pointer;white-space:nowrap;'>"
+        "📥 ดาวน์โหลด</button></div>"
+    )
 
     return status_html, preview_html
 
@@ -1016,8 +1024,6 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
                     ["PDF", "ต่อภาพแนวตั้ง (PNG)", "ต่อภาพแนวนอน (PNG)", "ZIP"],
                     value="PDF", label="รูปแบบไฟล์",
                 )
-                output_name = gr.Textbox(value="merged_images", label="ชื่อไฟล์ (ไม่ต้องใส่นามสกุล)")
-
                 with gr.Group() as pdf_settings:
                     pdf_quality = gr.Slider(50, 100, 85, step=1, label="คุณภาพภาพ PDF")
                     pdf_page_size = gr.Radio(
@@ -1106,7 +1112,7 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
         generate,
         [
             images_state, order_state,
-            output_format, output_name,
+            output_format,
             sharpen, contrast_sl, use_unsharp,
             unsharp_radius, unsharp_pct, unsharp_thresh,
             pdf_quality, pdf_page_size,
