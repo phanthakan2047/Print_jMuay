@@ -182,9 +182,9 @@ def _delete_all_sessions() -> str:
 
 def _hist_action_js(action: str, sid: int, confirm_msg: str = "") -> str:
     inner = (
-        "(function(){var w=document.getElementById('history_action_input');"
+        "(function(){var w=document.getElementById('sort_order_input');"
         "if(w){var t=w.querySelector('textarea')||w.querySelector('input');"
-        "if(t){t.value='{&quot;action&quot;:&quot;" + action + "&quot;,&quot;id&quot;:" + str(sid) + ",&quot;ts&quot;:'+Date.now()+'}';"
+        "if(t){t.value='__HIST_" + action.upper() + "__:" + str(sid) + "_'+Date.now();"
         "t.dispatchEvent(new Event('input',{bubbles:true}));"
         "t.dispatchEvent(new Event('change',{bubbles:true}));}}})()"
     )
@@ -218,7 +218,7 @@ def _render_history_html(sessions: list) -> str:
         if count > 6:
             thumb_html += f'<span style="color:#a0aec0;font-size:11px;align-self:center;">+{count-6}</span>'
         load_js = _hist_action_js("restore", sid)
-        del_js = _hist_action_js("delete", sid, f"ลบ session {created}?")
+        del_js = _hist_action_js("del", sid, f"ลบ session {created}?")
         items.append(
             f'<div style="background:#1a2a3a;border-radius:8px;padding:10px;margin-bottom:8px;'
             f'border:1px solid #2d4a6b;">'
@@ -319,12 +319,36 @@ def _render_sortable_html(order: list) -> str:
 
 
 def on_sort_change(new_order_json, images_state, order_state, current_files):
-    _no_change = (gr.update(), order_state, gr.update(), gr.update(), gr.update(), gr.update(), gr.update())
+    _no_change = (gr.update(), order_state, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update())
     if not new_order_json:
         return _no_change
     if new_order_json.startswith("__DEL__:"):
         name = new_order_json[8:].rsplit('_', 1)[0]
-        return on_remove_by_name(name, images_state, order_state, current_files)
+        return on_remove_by_name(name, images_state, order_state, current_files) + (gr.update(), gr.update())
+    if new_order_json.startswith("__HIST_RESTORE__:"):
+        sid = int(new_order_json[17:].rsplit('_', 1)[0])
+        new_images, new_order, msg = _restore_session(sid)
+        if new_images is None:
+            status = f"<p style='color:#c53030;font-size:13px;'>{msg}</p>"
+            return (gr.update(), order_state, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), status, gr.update())
+        sessions = _load_sessions() if db else []
+        status = f"<p style='color:#68d391;font-size:13px;'>{msg}</p>"
+        return (new_images, new_order,
+                _render_sortable_html(new_order),
+                _render_sortable_gallery_html(new_images, new_order),
+                gr.update(choices=new_order, value=new_order[0] if new_order else None),
+                _PRINT_STALE_HTML, gr.update(),
+                status, _render_history_html(sessions))
+    if new_order_json.startswith("__HIST_DEL__:"):
+        sid = int(new_order_json[13:].rsplit('_', 1)[0])
+        msg = _delete_session(sid)
+        try:
+            sessions = _load_sessions() if db else []
+        except Exception:
+            sessions = []
+        color = "c53030" if "❌" in msg else "68d391"
+        status = f"<p style='color:#{color};font-size:13px;'>{msg}</p>"
+        return (gr.update(), order_state, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), status, _render_history_html(sessions))
     try:
         new_order = json.loads(new_order_json)
         new_order = [n for n in new_order if n in (images_state or {})]
@@ -332,7 +356,8 @@ def on_sort_change(new_order_json, images_state, order_state, current_files):
             return _no_change
         return (gr.update(), new_order, _render_sortable_html(new_order),
                 _render_sortable_gallery_html(images_state, new_order),
-                gr.update(choices=new_order), _PRINT_STALE_HTML, gr.update())
+                gr.update(choices=new_order), _PRINT_STALE_HTML, gr.update(),
+                gr.update(), gr.update())
     except Exception:
         return _no_change
 
@@ -1139,7 +1164,8 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
     sort_order_input.change(
         on_sort_change,
         [sort_order_input, images_state, order_state, file_input],
-        [images_state, order_state, order_html, gallery, select_img, print_html, file_input],
+        [images_state, order_state, order_html, gallery, select_img, print_html, file_input,
+         history_status, history_html_out],
     )
 
     _move_outs = [order_state, order_html, gallery, select_img, print_html]
