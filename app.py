@@ -483,19 +483,30 @@ def _render_sortable_gallery_html(images: dict, order: list) -> str:
 # ── Event handlers ────────────────────────────────────────────────────────────
 def on_upload(files, images_state, order_state):
     if not files:
-        return {}, [], _render_sortable_html([]), _render_sortable_gallery_html({}, []), gr.update(choices=[], value=None)
+        return {}, [], _render_sortable_html([]), _render_sortable_gallery_html({}, []), gr.update(choices=[], value=None), _PRINT_STALE_HTML
 
     images = dict(images_state) if images_state else {}
+
+    # Load newly added files
+    current_names = set()
     for f in files:
         path = f.name if hasattr(f, "name") else str(f)
-        try:
-            img = Image.open(path)
-            img.load()
-            if img.mode == "P":
-                img = img.convert("RGBA" if "transparency" in img.info else "RGB")
-            images[Path(path).name] = img
-        except Exception:
-            pass
+        name = Path(path).name
+        current_names.add(name)
+        if name not in images:
+            try:
+                img = Image.open(path)
+                img.load()
+                if img.mode == "P":
+                    img = img.convert("RGBA" if "transparency" in img.info else "RGB")
+                images[name] = img
+            except Exception:
+                pass
+
+    # Remove images deleted from the file input
+    for name in list(images.keys()):
+        if name not in current_names:
+            del images[name]
 
     order = list(order_state) if order_state else []
     for name in images:
