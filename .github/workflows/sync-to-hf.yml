@@ -18,4 +18,5 @@ jobs:
         run: |
           git config user.email "github-actions@github.com"
           git config user.name "GitHub Actions"
-          git push https://Gee2002:$HF_TOKEN@huggingface.co/spaces/Gee2002/P_jMauy main --force
+          git remote add hf https://Gee2002:$HF_TOKEN@huggingface.co/spaces/Gee2002/P_jMauy
+          git push hf main --force --verbose 2>&1
