@@ -653,6 +653,7 @@ def generate(
     pdf_quality, pdf_page_size,
     max_dim, compress_level, bg_color,
     zip_quality,
+    auto_delete,
 ):
     if not images_state or not order_state:
         return None, "<p style='color:#c53030'>⚠️ ยังไม่มีภาพ กรุณาอัปโหลดก่อน</p>"
@@ -820,6 +821,8 @@ def generate(
             f"<div style='{_grid}'>" + "".join(thumb_items) + "</div>"
         )
 
+    _save_session(images_state, order_state, {}, bool(auto_delete))
+
     status_html = (
         f"<p style='color:#276749;font-weight:600;margin-bottom:8px;'>{msg} ({size_kb:.0f} KB)</p>"
         f"<a id='dl_link' href='data:{mime};base64,{b64_file}' style='display:none'>.</a>"
@@ -832,11 +835,6 @@ def generate(
         "var n=document.getElementById('dl_name').value.trim()||'merged_images';"
         f"if(!n.toLowerCase().endsWith('.{ext}'))n+='.{ext}';"
         "var a=document.getElementById('dl_link');a.download=n;a.click();"
-        "var w=document.getElementById('history_action_input');"
-        "var t=w&&(w.querySelector('textarea')||w.querySelector('input'));"
-        "if(t){t.value='{&quot;action&quot;:&quot;save&quot;,&quot;settings&quot;:{},&quot;ts&quot;:'+Date.now()+'}';"
-        "t.dispatchEvent(new Event('input',{bubbles:true}));"
-        "t.dispatchEvent(new Event('change',{bubbles:true}));}"
         "})()\""
         " style='padding:11px 24px;background:#276749;color:white;border:none;"
         "border-radius:8px;font-weight:bold;font-size:15px;cursor:pointer;white-space:nowrap;'>"
@@ -1166,6 +1164,7 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
             pdf_quality, pdf_page_size,
             max_dim, compress_level, bg_color,
             zip_quality,
+            auto_delete_cb,
         ],
         [status_html, preview_result],
     )
