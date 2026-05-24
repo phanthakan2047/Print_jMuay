@@ -1,12 +1,3 @@
-import sys
-import types
-
-# pydub (gradio dependency) uses audioop which was removed in Python 3.13
-if sys.version_info >= (3, 13):
-    _dummy = types.ModuleType("audioop")
-    sys.modules.setdefault("audioop", _dummy)
-    sys.modules.setdefault("pyaudioop", _dummy)
-
 import base64
 import io
 import os
@@ -470,4 +461,4 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
 
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(server_name="0.0.0.0", server_port=7860)
