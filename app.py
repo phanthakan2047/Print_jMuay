@@ -183,6 +183,20 @@ def _delete_all_sessions() -> str:
         return f"❌ ลบไม่สำเร็จ: {e}"
 
 
+def _hist_action_js(action: str, sid: int, confirm_msg: str = "") -> str:
+    inner = (
+        "(function(){var w=document.getElementById('history_action_input');"
+        "if(w){var t=w.querySelector('textarea')||w.querySelector('input');"
+        "if(t){t.value='{&quot;action&quot;:&quot;" + action + "&quot;,&quot;id&quot;:" + str(sid) + ",&quot;ts&quot;:'+Date.now()+'}';"
+        "t.dispatchEvent(new Event('input',{bubbles:true}));"
+        "t.dispatchEvent(new Event('change',{bubbles:true}));}}})()"
+    )
+    if confirm_msg:
+        safe = confirm_msg.replace("'", "\\'")
+        return "if(confirm('" + safe + "')){" + inner + "}"
+    return inner
+
+
 def _render_history_html(sessions: list) -> str:
     if not sessions:
         return "<p style='color:#888;padding:8px;text-align:center;'>ยังไม่มีประวัติที่บันทึกไว้</p>"
@@ -200,8 +214,8 @@ def _render_history_html(sessions: list) -> str:
         )
         if count > 6:
             thumb_html += f'<span style="color:#a0aec0;font-size:11px;align-self:center;">+{count-6}</span>'
-        rp = json.dumps({"action": "restore", "id": sid}).replace('"', '&quot;')
-        dp = json.dumps({"action": "delete", "id": sid}).replace('"', '&quot;')
+        load_js = _hist_action_js("restore", sid)
+        del_js = _hist_action_js("delete", sid, f"ลบ session {created}?")
         items.append(
             f'<div style="background:#1a2a3a;border-radius:8px;padding:10px;margin-bottom:8px;'
             f'border:1px solid #2d4a6b;">'
@@ -212,14 +226,10 @@ def _render_history_html(sessions: list) -> str:
             f'<div style="display:flex;gap:3px;margin-top:5px;flex-wrap:wrap;">{thumb_html}</div>'
             f'</div>'
             f'<div style="display:flex;gap:5px;flex-shrink:0;margin-top:2px;">'
-            f'<button onclick="(function(){{var w=document.getElementById(\'history_action_input\');'
-            f'if(w){{var t=w.querySelector(\'textarea\')||w.querySelector(\'input\');'
-            f'if(t){{t.value=\'{rp}\';t.dispatchEvent(new Event(\'input\',{{bubbles:true}}));}}}}}})();"'
+            f'<button onclick="{load_js}"'
             f' style="padding:4px 10px;background:#1a56a0;color:white;border:none;'
             f'border-radius:6px;font-size:12px;cursor:pointer;">📂 โหลด</button>'
-            f'<button onclick="if(confirm(\'ลบ session {created}?\')){{(function(){{var w=document.getElementById(\'history_action_input\');'
-            f'if(w){{var t=w.querySelector(\'textarea\')||w.querySelector(\'input\');'
-            f'if(t){{t.value=\'{dp}\';t.dispatchEvent(new Event(\'input\',{{bubbles:true}}));}}}}}})();}}"'
+            f'<button onclick="{del_js}"'
             f' style="padding:4px 10px;background:#9b2335;color:white;border:none;'
             f'border-radius:6px;font-size:12px;cursor:pointer;">🗑️</button>'
             f'</div></div></div>'
@@ -1070,7 +1080,6 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
             gr.Markdown("---")
             with gr.Accordion("📚 ประวัติ (Sessions)", open=False):
                 with gr.Row():
-                    btn_save_session = gr.Button("💾 บันทึก Session ปัจจุบัน", size="sm", variant="primary")
                     btn_refresh_history = gr.Button("🔄 รีเฟรช", size="sm")
                     btn_delete_all_sessions = gr.Button("🗑️ ลบทั้งหมด", size="sm", variant="stop")
                 auto_delete_cb = gr.Checkbox(
@@ -1139,10 +1148,6 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
     _hist_outs = [history_status, history_html_out,
                   images_state, order_state, order_html, gallery, select_img, print_html]
 
-    def _save_click(images_state, order_state, auto_delete):
-        payload = json.dumps({"action": "save", "settings": {}})
-        return on_history_action(payload, images_state, order_state, auto_delete)
-
     def _refresh_click(images_state, order_state, auto_delete):
         payload = json.dumps({"action": "refresh"})
         return on_history_action(payload, images_state, order_state, auto_delete)
@@ -1151,7 +1156,6 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
         payload = json.dumps({"action": "delete_all"})
         return on_history_action(payload, images_state, order_state, auto_delete)
 
-    btn_save_session.click(_save_click, [images_state, order_state, auto_delete_cb], _hist_outs)
     btn_refresh_history.click(_refresh_click, [images_state, order_state, auto_delete_cb], _hist_outs)
     btn_delete_all_sessions.click(_delete_all_click, [images_state, order_state, auto_delete_cb], _hist_outs)
     history_action_input.change(
