@@ -292,7 +292,7 @@ def on_sort_change(new_order_json, images_state, order_state, current_files):
     if not new_order_json:
         return _no_change
     if new_order_json.startswith("__DEL__:"):
-        name = new_order_json[8:]
+        name = new_order_json[8:].split('\t')[0]
         return on_remove_by_name(name, images_state, order_state, current_files)
     try:
         new_order = json.loads(new_order_json)
