@@ -37,6 +37,27 @@ SESSION_LIMIT = 20
 
 _RM_ONCLICK_JS = (
     "(function(n){"
+    # Primary: find the upload area's X button for this file and click it
+    "var area=document.getElementById('file_upload_area');"
+    "if(area){"
+    "var els=area.querySelectorAll('a,span,div');"
+    "for(var i=0;i<els.length;i++){"
+    "var el=els[i],ok=false;"
+    "try{"
+    "ok=el.getAttribute('download')===n||el.getAttribute('title')===n"
+    "||(el.children.length===0&&el.textContent.trim()===n);"
+    "if(!ok){var h=el.getAttribute('href');"
+    "ok=!!h&&decodeURIComponent(h.split('/').pop())===n;}"
+    "}catch(e){}"
+    "if(ok){"
+    "var row=el,btn=null;"
+    "for(var k=0;k<6&&row&&row!==area;k++){"
+    "btn=row.querySelector('button');if(btn)break;row=row.parentElement;}"
+    "if(btn){btn.click();return;}"
+    "}"
+    "}"
+    "}"
+    # Fallback: sort_order_input bridge (also updates file_input via Python)
     "var w=document.getElementById('sort_order_input');"
     "var t=w&&(w.querySelector('textarea')||w.querySelector('input'));"
     "if(t){t.value='__DEL__:'+n;"
@@ -286,19 +307,21 @@ def _render_sortable_html(order: list) -> str:
 }})();" style="display:none">"""
 
 
-def on_sort_change(new_order_json, images_state, order_state):
-    _no_change = (gr.update(), order_state, gr.update(), gr.update(), gr.update(), gr.update())
+def on_sort_change(new_order_json, images_state, order_state, current_files):
+    _no_change = (gr.update(), order_state, gr.update(), gr.update(), gr.update(), gr.update(), gr.update())
     if not new_order_json:
         return _no_change
     if new_order_json.startswith("__DEL__:"):
         name = new_order_json[8:]
-        return on_remove_by_name(name, images_state, order_state)
+        return on_remove_by_name(name, images_state, order_state, current_files)
     try:
         new_order = json.loads(new_order_json)
         new_order = [n for n in new_order if n in (images_state or {})]
         if not new_order:
             return _no_change
-        return gr.update(), new_order, _render_sortable_html(new_order), _render_sortable_gallery_html(images_state, new_order), gr.update(choices=new_order), _PRINT_STALE_HTML
+        return (gr.update(), new_order, _render_sortable_html(new_order),
+                _render_sortable_gallery_html(images_state, new_order),
+                gr.update(choices=new_order), _PRINT_STALE_HTML, gr.update())
     except Exception:
         return _no_change
 
@@ -507,20 +530,28 @@ def _render_sortable_gallery_html(images: dict, order: list) -> str:
 
 
 # ── Event handlers ────────────────────────────────────────────────────────────
-def on_remove_by_name(name, images_state, order_state):
+def on_remove_by_name(name, images_state, order_state, current_files=None):
     if not name:
-        return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+        return gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
     order = list(order_state)
     images = dict(images_state)
     if name in order:
         order.remove(name)
     images.pop(name, None)
     new_sel = order[0] if order else None
+    # Remove the file from gr.File component too, to keep upload area in sync
+    new_files = gr.update()
+    if current_files:
+        filtered = [f for f in current_files
+                    if Path(f.name if hasattr(f, "name") else str(f)).name != name]
+        if len(filtered) < len(current_files):
+            new_files = filtered
     return (
         images, order, _render_sortable_html(order),
         _render_sortable_gallery_html(images, order),
         gr.update(choices=order, value=new_sel),
         _PRINT_STALE_HTML,
+        new_files,
     )
 
 
@@ -958,6 +989,7 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
                 file_count="multiple",
                 file_types=["image"],
                 label="เลือกไฟล์ (.jpg .png .bmp .tiff .webp ...)",
+                elem_id="file_upload_area",
             )
             btn_clear = gr.Button("🗑️ ล้างทั้งหมด", size="sm")
 
@@ -1056,8 +1088,8 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
 
     sort_order_input.change(
         on_sort_change,
-        [sort_order_input, images_state, order_state],
-        [images_state, order_state, order_html, gallery, select_img, print_html],
+        [sort_order_input, images_state, order_state, file_input],
+        [images_state, order_state, order_html, gallery, select_img, print_html, file_input],
     )
 
     _move_outs = [order_state, order_html, gallery, select_img, print_html]
