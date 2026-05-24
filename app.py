@@ -577,44 +577,60 @@ def make_print_html(images_state, order_state, print_paper, print_orient, print_
     if print_orient == "แนวนอน":
         pw, ph = ph, pw
 
-    img_tags = []
-    for i, (_, img) in enumerate(ordered):
+    img_b64s = []
+    for _, img in ordered:
         rgb = prep_rgb(img)
         rgb.thumbnail((pw, ph), Image.LANCZOS)
         buf = io.BytesIO()
         rgb.save(buf, format="JPEG", quality=int(print_quality))
-        b64 = base64.b64encode(buf.getvalue()).decode()
-        pb = "" if i == len(ordered) - 1 else "page-break-after:always;"
-        img_tags.append(
-            f'<div style="{pb}text-align:center;padding:4mm;">'
-            f'<img src="data:image/jpeg;base64,{b64}" '
-            f'style="max-width:100%;max-height:255mm;object-fit:contain;"/></div>'
-        )
+        img_b64s.append(base64.b64encode(buf.getvalue()).decode())
 
-    imgs_html = "".join(img_tags)
-    imgs_escaped = imgs_html.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
     orient_css = "portrait" if print_orient == "แนวตั้ง" else "landscape"
+    uid = abs(hash(str([n for n, _ in ordered]))) % 999999
+    pd_json = json.dumps({"imgs": img_b64s, "paper": print_paper, "orient": orient_css})
 
-    return f"""
-<button onclick="(function(){{
-  var html='<!DOCTYPE html><html><head><meta charset=\\'utf-8\\'>'
-    +'<style>body{{margin:0;padding:0;background:white;}}'
-    +'@page{{size:{print_paper} {orient_css};margin:10mm;}}'
-    +'@media print{{.np{{display:none;}}}}</style></head>'
-    +'<body>{imgs_escaped}</body></html>';
-  var blob=new Blob([html],{{type:'text/html;charset=utf-8'}});
-  var url=URL.createObjectURL(blob);
-  var w=window.open(url,'_blank');
-  if(!w){{document.getElementById('pst').textContent='❌ กรุณาอนุญาต Pop-up ใน browser';}}
-  else{{document.getElementById('pst').textContent='✅ เปิดหน้าต่างพิมพ์แล้ว — กด Ctrl+P';
-    setTimeout(function(){{URL.revokeObjectURL(url);}},60000);}}
-}})()"
-style="width:100%;padding:12px;background:#1f4e79;color:white;border:none;
-border-radius:8px;font-size:15px;font-weight:bold;cursor:pointer;margin-top:4px;">
-🖨️ สั่งพิมพ์เลย ({len(ordered)} ภาพ)
+    return f"""<script type="application/json" id="pd{uid}">{pd_json}</script>
+<img src="px{uid}" onerror="(function(){{
+  var fd=JSON.parse(document.getElementById('pd{uid}').textContent);
+  window._print{uid}=function(){{
+    var n=fd.imgs.length,body='',i;
+    for(i=0;i<n;i++){{
+      var pb=i<n-1?'page-break-after:always;':'';
+      body+='<div style=\\''+pb+'text-align:center;padding:4mm;\\'>'
+           +'<img src=\\'data:image/jpeg;base64,'+fd.imgs[i]+'\\'>'
+           +'</div>';
+    }}
+    var h='<!DOCTYPE html><html><head><meta charset=\\'utf-8\\'>'
+      +'<style>body{{margin:0;padding:0;background:white}}'
+      +'@page{{size:'+fd.paper+' '+fd.orient+';margin:10mm}}</style>'
+      +'</head><body>'+body+'</body></html>';
+    var blob=new Blob([h],{{type:'text/html;charset=utf-8'}});
+    var url=URL.createObjectURL(blob);
+    var fr=document.createElement('iframe');
+    fr.style.cssText='position:fixed;left:-9999px;top:0;width:1px;height:1px;border:none';
+    document.body.appendChild(fr);
+    fr.onload=function(){{
+      try{{fr.contentWindow.focus();fr.contentWindow.print();}}
+      catch(ex){{
+        var a=document.createElement('a');
+        a.href=url;a.target='_blank';a.click();
+      }}
+      setTimeout(function(){{
+        try{{document.body.removeChild(fr);}}catch(e){{}}
+        URL.revokeObjectURL(url);
+      }},60000);
+    }};
+    fr.src=url;
+  }};
+}})();" style="display:none">
+<button onclick="window._print{uid}&&window._print{uid}()"
+  style="width:100%;padding:12px;background:#1f4e79;color:white;border:none;
+  border-radius:8px;font-size:15px;font-weight:bold;cursor:pointer;margin-top:4px;">
+  🖨️ สั่งพิมพ์เลย ({len(ordered)} ภาพ)
 </button>
-<div id="pst" style="text-align:center;margin-top:6px;font-size:12px;color:#555;min-height:16px;"></div>
-"""
+<p style="text-align:center;font-size:12px;color:#888;margin-top:4px;">
+  กดปุ่มด้านบน → หน้าต่างพิมพ์จะเปิดขึ้น → กด Ctrl+P เพื่อพิมพ์
+</p>"""
 
 
 # ── Gradio UI ─────────────────────────────────────────────────────────────────
