@@ -126,15 +126,12 @@ def _save_session(images: dict, order: list, settings: dict, auto_delete: bool) 
 def _load_sessions() -> list:
     if not db:
         return []
-    try:
-        res = (db.table("image_sessions")
-               .select("id,created_at,image_names,thumbnails,settings")
-               .order("created_at", desc=True)
-               .limit(SESSION_LIMIT)
-               .execute())
-        return res.data or []
-    except Exception:
-        return []
+    res = (db.table("image_sessions")
+           .select("id,created_at,image_names,thumbnails,settings")
+           .order("created_at", desc=True)
+           .limit(SESSION_LIMIT)
+           .execute())
+    return res.data or []
 
 
 def _restore_session(sid: int):
@@ -198,6 +195,12 @@ def _hist_action_js(action: str, sid: int, confirm_msg: str = "") -> str:
 
 
 def _render_history_html(sessions: list) -> str:
+    if not db:
+        return ("<div style='padding:12px;background:#2d1a00;border:1px solid #c05621;"
+                "border-radius:8px;margin:4px 0;'>"
+                "<p style='color:#f6ad55;margin:0;font-weight:600;'>⚠️ ไม่ได้เชื่อมต่อ Supabase</p>"
+                "<p style='color:#a0aec0;font-size:12px;margin:4px 0 0;'>"
+                "ตรวจสอบ SUPABASE_URL และ SUPABASE_KEY ใน environment variables</p></div>")
     if not sessions:
         return "<p style='color:#888;padding:8px;text-align:center;'>ยังไม่มีประวัติที่บันทึกไว้</p>"
     items = []
@@ -951,9 +954,18 @@ def on_history_action(action_json, images_state, order_state, auto_delete):
 
     if action == "save":
         settings = payload.get("settings", {})
-        msg = _save_session(images_state or {}, order_state or [], settings, bool(auto_delete))
-        sessions = _load_sessions()
-        status = f"<p style='color:#{'f6ad55' if '⚠️' in msg else ('c53030' if '❌' in msg else '68d391')};font-size:13px;'>{msg}</p>"
+        if not images_state:
+            return gr.update(), history_html, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+        try:
+            msg = _save_session(images_state, order_state or [], settings, bool(auto_delete))
+        except Exception as e:
+            msg = f"❌ บันทึกไม่สำเร็จ: {e}"
+        try:
+            sessions = _load_sessions()
+        except Exception:
+            sessions = []
+        color = "f6ad55" if "⚠️" in msg else ("c53030" if "❌" in msg else "68d391")
+        status = f"<p style='color:#{color};font-size:13px;'>{msg}</p>"
         return status, _render_history_html(sessions), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
 
     elif action == "restore":
@@ -973,19 +985,39 @@ def on_history_action(action_json, images_state, order_state, auto_delete):
     elif action == "delete":
         sid = int(payload.get("id", 0))
         msg = _delete_session(sid)
-        sessions = _load_sessions()
-        status = f"<p style='color:#{'c53030' if '❌' in msg else '68d391'};font-size:13px;'>{msg}</p>"
+        try:
+            sessions = _load_sessions()
+        except Exception as e:
+            sessions = []
+            msg += f" (โหลดใหม่ไม่สำเร็จ: {e})"
+        color = "c53030" if "❌" in msg else "68d391"
+        status = f"<p style='color:#{color};font-size:13px;'>{msg}</p>"
         return status, _render_history_html(sessions), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
 
     elif action == "delete_all":
         msg = _delete_all_sessions()
-        sessions = _load_sessions()
-        status = f"<p style='color:#{'c53030' if '❌' in msg else '68d391'};font-size:13px;'>{msg}</p>"
+        try:
+            sessions = _load_sessions()
+        except Exception:
+            sessions = []
+        color = "c53030" if "❌" in msg else "68d391"
+        status = f"<p style='color:#{color};font-size:13px;'>{msg}</p>"
         return status, _render_history_html(sessions), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
 
     elif action == "refresh":
-        sessions = _load_sessions()
-        return gr.update(), _render_history_html(sessions), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+        if not db:
+            status = "<p style='color:#f6ad55;font-size:13px;'>⚠️ ไม่ได้เชื่อมต่อ Supabase — ตรวจสอบ SUPABASE_URL / SUPABASE_KEY</p>"
+            return status, _render_history_html([]), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+        try:
+            sessions = _load_sessions()
+            if sessions:
+                status = f"<p style='color:#68d391;font-size:13px;'>✅ โหลดประวัติสำเร็จ ({len(sessions)} รายการ)</p>"
+            else:
+                status = "<p style='color:#a0aec0;font-size:13px;'>📭 ยังไม่มีประวัติ — ลองกดดาวน์โหลดไฟล์ก่อน แล้วรีเฟรชอีกครั้ง</p>"
+            return status, _render_history_html(sessions), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+        except Exception as e:
+            status = f"<p style='color:#c53030;font-size:13px;'>❌ โหลดไม่สำเร็จ: {e}</p>"
+            return status, _render_history_html([]), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
 
     return gr.update(), history_html, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
 
