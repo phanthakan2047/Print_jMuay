@@ -1,3 +1,12 @@
+import sys
+import types
+
+# pydub (gradio dependency) uses audioop which was removed in Python 3.13
+if sys.version_info >= (3, 13):
+    _dummy = types.ModuleType("audioop")
+    sys.modules.setdefault("audioop", _dummy)
+    sys.modules.setdefault("pyaudioop", _dummy)
+
 import base64
 import io
 import os
