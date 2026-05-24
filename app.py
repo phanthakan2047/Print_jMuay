@@ -53,7 +53,7 @@ _RM_ONCLICK_JS = (
     "var row=el,btn=null;"
     "for(var k=0;k<6&&row&&row!==area;k++){"
     "btn=row.querySelector('button');if(btn)break;row=row.parentElement;}"
-    "if(btn){btn.click();return;}"
+    "if(btn){btn.click();}"
     "}"
     "}"
     "}"
@@ -545,7 +545,7 @@ def on_remove_by_name(name, images_state, order_state, current_files=None):
         filtered = [f for f in current_files
                     if Path(f.name if hasattr(f, "name") else str(f)).name != name]
         if len(filtered) < len(current_files):
-            new_files = filtered
+            new_files = filtered if filtered else None
     return (
         images, order, _render_sortable_html(order),
         _render_sortable_gallery_html(images, order),
@@ -631,7 +631,7 @@ def remove_image(selected, images_state, order_state):
 
 
 def clear_all():
-    return {}, [], _render_sortable_html([]), _render_sortable_gallery_html({}, []), gr.update(choices=[], value=None), "", "", _PRINT_STALE_HTML
+    return {}, [], _render_sortable_html([]), _render_sortable_gallery_html({}, []), gr.update(choices=[], value=None), "", "", _PRINT_STALE_HTML, None
 
 
 def generate(
@@ -1101,7 +1101,7 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
     )
     btn_clear.click(
         clear_all, [],
-        [images_state, order_state, order_html, gallery, select_img, status_html, preview_result, print_html],
+        [images_state, order_state, order_html, gallery, select_img, status_html, preview_result, print_html, file_input],
     )
 
     btn_generate.click(
