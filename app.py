@@ -126,21 +126,21 @@ def _render_sortable_gallery_html(images: dict, order: list) -> str:
     uid = abs(hash("gal" + str(order))) % 999999
     items = []
     full_imgs: dict[str, str] = {}
+    valid_names = []
 
     for i, name in enumerate(order):
         if name not in images:
             continue
         img = images[name]
         safe = name.replace('"', "&quot;").replace("'", "&#39;")
+        valid_names.append(name)
 
-        # Thumbnail for grid (small, fast)
         thumb = img.copy()
         thumb.thumbnail((180, 180), Image.LANCZOS)
         buf = io.BytesIO()
         prep_rgb(thumb).save(buf, format="JPEG", quality=72)
         thumb_b64 = base64.b64encode(buf.getvalue()).decode()
 
-        # Full image for lightbox (sharp, high quality)
         full = img.copy()
         full.thumbnail((900, 900), Image.LANCZOS)
         buf = io.BytesIO()
@@ -161,7 +161,7 @@ def _render_sortable_gallery_html(images: dict, order: list) -> str:
             f'<img src="data:image/jpeg;base64,{thumb_b64}" '
             f'style="max-width:100%;max-height:140px;object-fit:contain;border-radius:4px;'
             f'pointer-events:none;display:block;margin:auto;"/>'
-            f'<button class="lb-btn" onclick="lbOpen_{uid}(\'{safe}\')" '
+            f'<button class="lb-btn" onclick="lbOpen_{uid}({len(valid_names)-1})" '
             f'style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.72);'
             f'color:white;border:none;border-radius:4px;padding:2px 7px;cursor:pointer;'
             f'font-size:14px;line-height:1.4;" title="ดูภาพเต็ม">⛶</button>'
@@ -173,7 +173,12 @@ def _render_sortable_gallery_html(images: dict, order: list) -> str:
         )
 
     items_html = "".join(items)
-    full_json = json.dumps(full_imgs)
+    full_data = {"names": valid_names, "imgs": full_imgs}
+    full_json = json.dumps(full_data)
+    nav_btn = ("position:absolute;top:50%;transform:translateY(-50%);"
+               "background:rgba(255,255,255,0.15);color:white;border:none;"
+               "border-radius:50%;width:48px;height:48px;font-size:24px;"
+               "cursor:pointer;z-index:3;transition:opacity 0.2s;")
 
     return f"""
 <div id="lb{uid}" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.93);
@@ -181,9 +186,9 @@ def _render_sortable_gallery_html(images: dict, order: list) -> str:
   <button onclick="document.getElementById('lb{uid}').style.display='none'"
     style="position:absolute;top:14px;right:18px;background:rgba(255,255,255,0.15);
     color:white;border:none;border-radius:50%;width:42px;height:42px;font-size:22px;
-    cursor:pointer;z-index:2;">✕</button>
+    cursor:pointer;z-index:3;">✕</button>
   <div style="position:absolute;top:14px;left:50%;transform:translateX(-50%);
-    display:flex;gap:6px;z-index:2;">
+    display:flex;gap:6px;align-items:center;z-index:3;">
     <button onclick="lbZoom_{uid}(1.3)"
       style="background:rgba(255,255,255,0.15);color:white;border:none;border-radius:6px;
       width:36px;height:36px;font-size:18px;cursor:pointer;">+</button>
@@ -194,11 +199,17 @@ def _render_sortable_gallery_html(images: dict, order: list) -> str:
       style="background:rgba(255,255,255,0.15);color:white;border:none;border-radius:6px;
       padding:0 10px;height:36px;font-size:12px;cursor:pointer;">รีเซ็ต</button>
     <span id="lbz{uid}" style="color:rgba(255,255,255,0.7);font-size:12px;
-      line-height:36px;min-width:40px;text-align:center;">100%</span>
+      min-width:44px;text-align:center;">100%</span>
+    <span id="lbct{uid}" style="color:rgba(255,255,255,0.85);font-size:13px;
+      background:rgba(255,255,255,0.12);padding:2px 12px;border-radius:12px;">1 / 1</span>
   </div>
-  <div id="lbw{uid}" style="overflow:hidden;width:92vw;height:88vh;display:flex;
-    align-items:center;justify-content:center;cursor:grab;">
-    <img id="lbi{uid}" style="max-width:92vw;max-height:88vh;object-fit:contain;
+  <button id="lbprev{uid}" onclick="lbNav_{uid}(-1)"
+    style="{nav_btn}left:12px;">❮</button>
+  <button id="lbnext{uid}" onclick="lbNav_{uid}(1)"
+    style="{nav_btn}right:12px;">❯</button>
+  <div id="lbw{uid}" style="overflow:hidden;width:84vw;height:82vh;display:flex;
+    align-items:center;justify-content:center;cursor:default;">
+    <img id="lbi{uid}" style="max-width:84vw;max-height:82vh;object-fit:contain;
       border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,0.9);
       transform-origin:center;user-select:none;pointer-events:none;"/>
   </div>
@@ -210,19 +221,41 @@ def _render_sortable_gallery_html(images: dict, order: list) -> str:
   gap:8px;max-height:460px;overflow-y:auto;padding:4px;">{items_html}</div>
 <script type="application/json" id="fi{uid}">{full_json}</script>
 <img src="gi{uid}" onerror="(function(){{
-  var fi=JSON.parse(document.getElementById('fi{uid}').textContent);
-  var _sc{uid}=1,_tx{uid}=0,_ty{uid}=0,_drag{uid}=false,_sx{uid}=0,_sy{uid}=0;
+  var fd=JSON.parse(document.getElementById('fi{uid}').textContent);
+  var _names{uid}=fd.names,_fi{uid}=fd.imgs;
+  var _sc{uid}=1,_tx{uid}=0,_ty{uid}=0,_drag{uid}=false,_sx{uid}=0,_sy{uid}=0,_idx{uid}=0;
   function _applyT{uid}(){{
     var img=document.getElementById('lbi{uid}');
     img.style.transform='scale('+_sc{uid}+') translate('+_tx{uid}/_sc{uid}+'px,'+_ty{uid}/_sc{uid}+'px)';
     document.getElementById('lbz{uid}').textContent=Math.round(_sc{uid}*100)+'%';
-    var w=document.getElementById('lbw{uid}');
-    w.style.cursor=_sc{uid}>1?'grab':'default';
+    document.getElementById('lbw{uid}').style.cursor=_sc{uid}>1?'grab':'default';
   }}
   window.lbZoom_{uid}=function(f){{_sc{uid}=Math.min(8,Math.max(0.5,_sc{uid}*f));_applyT{uid}();}};
   window.lbReset_{uid}=function(){{_sc{uid}=1;_tx{uid}=0;_ty{uid}=0;_applyT{uid}();}};
+  function lbShow_{uid}(){{
+    var name=_names{uid}[_idx{uid}];
+    var b64=_fi{uid}[name];if(!b64)return;
+    _sc{uid}=1;_tx{uid}=0;_ty{uid}=0;
+    var img=document.getElementById('lbi{uid}');
+    img.src='data:image/jpeg;base64,'+b64;
+    img.style.transform='';
+    document.getElementById('lbz{uid}').textContent='100%';
+    document.getElementById('lbct{uid}').textContent=(_idx{uid}+1)+' / '+_names{uid}.length;
+    document.getElementById('lbc{uid}').textContent=(_idx{uid}+1)+'. '+name;
+    document.getElementById('lbprev{uid}').style.opacity=_idx{uid}===0?'0.25':'1';
+    document.getElementById('lbnext{uid}').style.opacity=_idx{uid}===_names{uid}.length-1?'0.25':'1';
+  }}
+  window.lbNav_{uid}=function(d){{
+    _idx{uid}=Math.max(0,Math.min(_names{uid}.length-1,_idx{uid}+d));
+    lbShow_{uid}();
+  }};
+  window.lbOpen_{uid}=function(idx){{
+    _idx{uid}=idx;lbShow_{uid}();
+    document.getElementById('lb{uid}').style.display='flex';
+  }};
   var lbw=document.getElementById('lbw{uid}');
   lbw.addEventListener('wheel',function(e){{
+    if(!e.ctrlKey&&!e.metaKey)return;
     e.preventDefault();
     _sc{uid}=Math.min(8,Math.max(0.5,_sc{uid}*(e.deltaY<0?1.15:0.87)));
     _applyT{uid}();
@@ -238,32 +271,22 @@ def _render_sortable_gallery_html(images: dict, order: list) -> str:
   }});
   window.addEventListener('mouseup',function(){{
     _drag{uid}=false;
-    if(document.getElementById('lbw{uid}'))
-      document.getElementById('lbw{uid}').style.cursor=_sc{uid}>1?'grab':'default';
+    var w=document.getElementById('lbw{uid}');
+    if(w)w.style.cursor=_sc{uid}>1?'grab':'default';
   }});
   document.getElementById('lbi{uid}').addEventListener('dblclick',function(){{
     if(_sc{uid}>1){{_sc{uid}=1;_tx{uid}=0;_ty{uid}=0;}}else{{_sc{uid}=2;}}
     _applyT{uid}();
   }});
-  window.lbOpen_{uid}=function(name){{
-    var b64=fi[name];if(!b64)return;
-    _sc{uid}=1;_tx{uid}=0;_ty{uid}=0;
-    var img=document.getElementById('lbi{uid}');
-    img.src='data:image/jpeg;base64,'+b64;
-    img.style.transform='';
-    document.getElementById('lbz{uid}').textContent='100%';
-    var num=0;
-    document.querySelectorAll('#gc{uid} .gi').forEach(function(x,i){{if(x.dataset.name===name)num=i+1;}});
-    document.getElementById('lbc{uid}').textContent=num+'. '+name;
-    var lb=document.getElementById('lb{uid}');
-    lb.style.display='flex';
-    lb.onclick=function(e){{if(e.target===lb||e.target===lbw)lbReset_{uid}(),lb.style.display='none';}};
-  }};
+  var lb=document.getElementById('lb{uid}');
+  lb.onclick=function(e){{if(e.target===lb||e.target===lbw){{lbReset_{uid}();lb.style.display='none';}}}};
   document.addEventListener('keydown',function(e){{
-    if(e.key==='Escape'){{
-      var lb=document.getElementById('lb{uid}');
-      if(lb&&lb.style.display!='none'){{lbReset_{uid}();lb.style.display='none';}}
-    }}
+    if(!lb||lb.style.display==='none')return;
+    if(e.key==='Escape'){{lbReset_{uid}();lb.style.display='none';}}
+    else if(e.key==='ArrowLeft')lbNav_{uid}(-1);
+    else if(e.key==='ArrowRight')lbNav_{uid}(1);
+    else if(e.key==='+'||e.key==='=')lbZoom_{uid}(1.3);
+    else if(e.key==='-')lbZoom_{uid}(1/1.3);
   }});
   var go=function(){{
     var c=document.getElementById('gc{uid}');
@@ -474,31 +497,61 @@ def generate(
     b64_file = base64.b64encode(data).decode()
 
     # Build result preview HTML
+    _grid = "display:flex;flex-wrap:wrap;gap:8px;max-height:420px;overflow-y:auto;padding:4px;"
     if ext in ("png",):
         prev = canvas.copy()
-        prev.thumbnail((700, 700), Image.LANCZOS)
+        prev.thumbnail((700, 2000), Image.LANCZOS)
         pbuf = io.BytesIO()
         prev.save(pbuf, format="JPEG", quality=82)
         prev_b64 = base64.b64encode(pbuf.getvalue()).decode()
         preview_html = (
-            f"<p style='color:#888;font-size:12px;margin:4px 0;'>ตัวอย่างผลลัพธ์:</p>"
+            f"<p style='color:#888;font-size:12px;margin:4px 0;'>"
+            f"ตัวอย่างผลลัพธ์ ({canvas.width}×{canvas.height} px):</p>"
             f"<img src='data:image/jpeg;base64,{prev_b64}' "
             f"style='max-width:100%;border-radius:8px;border:1px solid #2d3e50;'/>"
         )
     elif ext == "pdf":
-        prev = pdf_imgs[0].copy()
-        prev.thumbnail((600, 600), Image.LANCZOS)
-        pbuf = io.BytesIO()
-        prev.save(pbuf, format="JPEG", quality=82)
-        prev_b64 = base64.b64encode(pbuf.getvalue()).decode()
+        thumb_items = []
+        for i, pimg in enumerate(pdf_imgs):
+            prev = pimg.copy()
+            prev.thumbnail((220, 310), Image.LANCZOS)
+            pbuf = io.BytesIO()
+            prev.save(pbuf, format="JPEG", quality=80)
+            prev_b64 = base64.b64encode(pbuf.getvalue()).decode()
+            thumb_items.append(
+                f"<div style='display:flex;flex-direction:column;align-items:center;gap:4px;'>"
+                f"<img src='data:image/jpeg;base64,{prev_b64}' "
+                f"style='max-width:150px;border-radius:4px;border:1px solid #2d3e50;"
+                f"box-shadow:0 2px 8px rgba(0,0,0,0.4);'/>"
+                f"<span style='font-size:11px;color:#a0aec0;'>หน้า {i+1}</span>"
+                f"</div>"
+            )
         preview_html = (
-            f"<p style='color:#888;font-size:12px;margin:4px 0;'>ตัวอย่างหน้า 1/{len(pdf_imgs)}:</p>"
-            f"<img src='data:image/jpeg;base64,{prev_b64}' "
-            f"style='max-width:100%;border-radius:8px;border:1px solid #2d3e50;'/>"
+            f"<p style='color:#888;font-size:12px;margin:4px 0 8px;'>ตัวอย่างทั้ง {len(pdf_imgs)} หน้า:</p>"
+            f"<div style='{_grid}'>" + "".join(thumb_items) + "</div>"
         )
     else:
-        rows = "".join(f"<li style='font-size:12px;color:#a0aec0;'>{n}</li>" for n in names)
-        preview_html = f"<p style='color:#888;font-size:12px;margin:4px 0;'>ไฟล์ใน ZIP:</p><ul style='margin:4px 0;padding-left:18px;'>{rows}</ul>"
+        thumb_items = []
+        for i, (name, img) in enumerate(zip(names, imgs)):
+            prev = img.copy()
+            prev.thumbnail((120, 120), Image.LANCZOS)
+            pbuf = io.BytesIO()
+            prep_rgb(prev).save(pbuf, format="JPEG", quality=75)
+            prev_b64 = base64.b64encode(pbuf.getvalue()).decode()
+            safe = name.replace('"', "&quot;")
+            thumb_items.append(
+                f"<div style='display:flex;flex-direction:column;align-items:center;gap:2px;'>"
+                f"<img src='data:image/jpeg;base64,{prev_b64}' "
+                f"style='width:80px;height:80px;object-fit:contain;border-radius:4px;"
+                f"border:1px solid #2d3e50;'/>"
+                f"<span style='font-size:10px;color:#a0aec0;max-width:90px;overflow:hidden;"
+                f"text-overflow:ellipsis;white-space:nowrap;' title='{safe}'>{name}</span>"
+                f"</div>"
+            )
+        preview_html = (
+            f"<p style='color:#888;font-size:12px;margin:4px 0 8px;'>ไฟล์ใน ZIP ({len(names)} ไฟล์):</p>"
+            f"<div style='{_grid}'>" + "".join(thumb_items) + "</div>"
+        )
 
     status_html = f"""
 <p style='color:#276749;font-weight:600;margin-bottom:8px;'>{msg} ({size_kb:.0f} KB)</p>
