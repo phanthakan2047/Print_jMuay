@@ -572,7 +572,6 @@ def make_print_html(images_state, order_state, print_paper, print_orient, print_
     if not ordered:
         return "<p style='color:#888'>ไม่มีภาพ</p>"
 
-    # Use higher resolution for print quality
     sizes = {"A4": (1654, 2339), "A3": (2339, 3307), "Letter": (1700, 2200)}
     pw, ph = sizes.get(print_paper, (1654, 2339))
     if print_orient == "แนวนอน":
@@ -589,66 +588,53 @@ def make_print_html(images_state, order_state, print_paper, print_orient, print_
     orient_css = "portrait" if print_orient == "แนวตั้ง" else "landscape"
     uid = abs(hash(str([n for n, _ in ordered]))) % 999999
 
-    # Build the full print HTML entirely on the Python side.
-    # Each image gets its own page, fitted to the paper with no margins.
     pages_html = "".join(
-        f'<div class="p"><img src="data:image/jpeg;base64,{b64}"/></div>'
+        f'<div class="prp"><img src="data:image/jpeg;base64,{b64}"/></div>'
         for b64 in img_b64s
     )
-    print_html = (
-        '<!DOCTYPE html><html><head>'
-        '<meta charset="utf-8">'
-        '<style>'
-        '*{margin:0;padding:0;box-sizing:border-box}'
-        'html,body{background:white}'
-        f'@page{{size:{print_paper} {orient_css};margin:0}}'
-        '.p{width:100vw;height:100vh;display:flex;align-items:center;'
-        'justify-content:center;page-break-after:always;overflow:hidden}'
-        '.p:last-child{page-break-after:auto}'
-        'img{max-width:100%;max-height:100%;object-fit:contain;display:block}'
-        '</style>'
-        # Auto-open print dialog when the tab loads
-        '<script>window.addEventListener("load",function(){'
-        'setTimeout(function(){window.print();},500);'
-        '});</script>'
-        '</head><body>' + pages_html + '</body></html>'
-    )
 
-    # Base64-encode the whole HTML so it can be safely stored in a DOM text node
-    # and decoded client-side without any quote-escaping issues.
-    html_b64 = base64.b64encode(print_html.encode('utf-8')).decode()
-
-    # The onclick is single-quoted, so JS strings inside use double quotes freely.
-    # html_b64 is pure [A-Za-z0-9+/=] — safe as a DOM text node, no escaping needed.
-    return f"""<div id='phb{uid}' style='display:none'>{html_b64}</div>
-<div style='background:#162032;border-radius:10px;padding:14px;border:1px solid #2d4a6b;margin-top:4px;'>
-  <p style='color:#68d391;font-weight:700;margin-bottom:10px;text-align:center;font-size:14px;'>
+    # Strategy: inject a hidden overlay into the current page.
+    # @media print CSS hides ALL Gradio UI and shows only our overlay.
+    # window.print() is called directly — no popup, no new tab, no blocker.
+    # onafterprint hides the overlay again when printing is done.
+    return f"""<style>
+@page{{size:{print_paper} {orient_css};margin:0}}
+@media print{{
+  body *{{visibility:hidden!important;margin:0!important;padding:0!important}}
+  #pro{uid},#pro{uid} *{{visibility:visible!important}}
+  #pro{uid}{{
+    position:fixed!important;top:0!important;left:0!important;
+    width:100vw!important;height:auto!important;
+    background:white!important;z-index:2147483647!important;
+  }}
+  #pro{uid} .prp{{page-break-after:always!important}}
+  #pro{uid} .prp:last-child{{page-break-after:auto!important}}
+}}
+#pro{uid} .prp{{
+  width:100vw;height:100vh;
+  display:flex;align-items:center;justify-content:center;
+  overflow:hidden;background:white;
+}}
+#pro{uid} .prp img{{
+  max-width:100%;max-height:100%;
+  object-fit:contain;display:block;
+}}
+</style>
+<div id="pro{uid}" style="display:none;">{pages_html}</div>
+<div style="background:#162032;border-radius:10px;padding:14px;border:1px solid #2d4a6b;margin-top:4px;">
+  <p style="color:#68d391;font-weight:700;margin-bottom:10px;text-align:center;font-size:14px;">
     ✅ เตรียมพร้อมแล้ว {len(ordered)} ภาพ &nbsp;|&nbsp; {print_paper} · {orient_css}
   </p>
-  <button onclick='(function(){{
-    var b=document.getElementById("phb{uid}").textContent.trim();
-    var s=atob(b),arr=new Uint8Array(s.length),i;
-    for(i=0;i<s.length;i++)arr[i]=s.charCodeAt(i);
-    var blob=new Blob([arr],{{type:"text/html;charset=utf-8"}});
-    var url=URL.createObjectURL(blob);
-    var w=window.open(url,"_blank");
-    if(!w){{
-      var a=document.createElement("a");
-      a.href=url;a.target="_blank";a.rel="noopener";
-      document.body.appendChild(a);a.click();document.body.removeChild(a);
-    }}
-    setTimeout(function(){{URL.revokeObjectURL(url);}},300000);
-  }})()'
-  style='width:100%;padding:14px;background:#1a56a0;color:white;border:none;
-  border-radius:8px;font-size:15px;font-weight:bold;cursor:pointer;
-  margin-bottom:10px;display:block;text-align:center;'>
-    🖨️ เปิดหน้าพิมพ์ + เลือกเครื่องพิมพ์  ({len(ordered)} ภาพ)
+  <button onclick="var o=document.getElementById('pro{uid}');o.style.display='block';var done=function(){{o.style.display='none';window.onafterprint=null;}};window.onafterprint=done;setTimeout(done,180000);window.print();"
+    style="width:100%;padding:14px;background:#1a56a0;color:white;border:none;
+    border-radius:8px;font-size:15px;font-weight:bold;cursor:pointer;
+    margin-bottom:10px;display:block;text-align:center;">
+    🖨️ สั่งพิมพ์เลย ({len(ordered)} ภาพ)
   </button>
-  <div style='font-size:11px;color:#a0aec0;line-height:1.7;'>
-    <p>① กดปุ่มด้านบน → แท็บใหม่เปิดขึ้น</p>
-    <p>② กล่องเลือกเครื่องพิมพ์เปิดอัตโนมัติ → เลือกเครื่อง → กด <b>พิมพ์</b></p>
-    <p>③ แต่ละภาพพิมพ์ 1 ภาพต่อหน้า จัดเต็มพื้นที่กระดาษ</p>
-    <p style='color:#718096;margin-top:4px;'>หากป๊อปอัพถูกบล็อก: อนุญาต pop-up ใน browser แล้วกดอีกครั้ง</p>
+  <div style="font-size:11px;color:#a0aec0;line-height:1.9;">
+    <p>① กดปุ่มด้านบน → กล่องเลือกเครื่องพิมพ์เปิดขึ้นทันที</p>
+    <p>② เลือกเครื่องพิมพ์ → กด <b style="color:#e2e8f0;">พิมพ์</b></p>
+    <p>③ ทีละ 1 ภาพต่อหน้า จัดให้เต็มพื้นที่กระดาษอัตโนมัติ</p>
   </div>
 </div>"""
 
