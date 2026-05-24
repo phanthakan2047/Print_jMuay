@@ -35,6 +35,23 @@ def _save_to_db(fmt: str, count: int, size_kb: float, filename: str, enhancement
 
 SESSION_LIMIT = 20
 
+_RM_HANDLER_JS = (
+    "if(!window._rmHandlerSetup){"
+    "window._rmHandlerSetup=true;"
+    "document.addEventListener('click',function(e){"
+    "var b=e.target&&e.target.closest&&e.target.closest('.rm-btn');"
+    "if(!b)return;"
+    "var p=b.closest('[data-name]');"
+    "if(!p)return;"
+    "var n=p.dataset.name;"
+    "var w=document.getElementById('sort_order_input');"
+    "var t=w&&(w.querySelector('textarea')||w.querySelector('input'));"
+    "if(t){t.value='__DEL__:'+n;"
+    "t.dispatchEvent(new Event('input',{bubbles:true}));}"
+    "});"
+    "}"
+)
+
 _PRINT_STALE_HTML = ("<div style='background:#2d1a00;border:1px solid #c05621;border-radius:8px;"
                      "padding:10px 14px;margin-top:4px;'>"
                      "<p style='color:#f6ad55;font-weight:700;margin:0;'>"
@@ -229,15 +246,6 @@ def apply_enhancements(img, sharpness, contrast, use_unsharp,
     return img
 
 
-def _rm_onclick(name: str) -> str:
-    safe = name.replace("\\", "\\\\").replace("'", "\\'")
-    return (
-        "(function(){var w=document.getElementById('sort_order_input');"
-        "if(w){var t=w.querySelector('textarea')||w.querySelector('input');"
-        "if(t){t.value='__DEL__:" + safe + "';"
-        "t.dispatchEvent(new Event('input',{bubbles:true}));}}})()"
-    )
-
 
 def _render_sortable_html(order: list) -> str:
     if not order:
@@ -252,16 +260,20 @@ def _render_sortable_html(order: list) -> str:
         f'min-width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;'
         f'font-weight:bold;font-size:11px;flex-shrink:0;">{i+1}</span>'
         f'<span style="color:#e2e8f0;flex:1;word-break:break-all;font-size:13px;">☰ {name}</span>'
-        f'<button class="rm-btn" onclick="{_rm_onclick(name)}"'
+        f'<button class="rm-btn"'
         f' style="background:rgba(180,30,30,0.85);color:white;border:none;border-radius:4px;'
         f'padding:1px 8px;cursor:pointer;font-size:15px;line-height:1.4;flex-shrink:0;"'
         f' title="ลบภาพนี้">✕</button>'
         f'</div>'
         for i, name in enumerate(order)
     )
-    return f"""<div id="sc{uid}" style="max-height:300px;overflow-y:auto;padding:2px;">{items}</div>
+    return (
+        f"""<div id="sc{uid}" style="max-height:300px;overflow-y:auto;padding:2px;">{items}</div>
 <style>.sg{{opacity:.5;background:#2d5a8e!important;}}</style>
 <img src="x{uid}" onerror="(function(){{
+  """
+        + _RM_HANDLER_JS
+        + f"""
   var go=function(){{
     var c=document.getElementById('sc{uid}');
     if(!c||c._s)return;c._s=true;
@@ -282,6 +294,7 @@ def _render_sortable_html(order: list) -> str:
     s.onload=go;document.head.appendChild(s);
   }}else{{setTimeout(function(){{if(window.Sortable)go();}},300);}}
 }})();" style="display:none">"""
+    )
 
 
 def on_sort_change(new_order_json, images_state, order_state):
@@ -353,7 +366,7 @@ def _render_sortable_gallery_html(images: dict, order: list) -> str:
             f'style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.72);'
             f'color:white;border:none;border-radius:4px;padding:2px 7px;cursor:pointer;'
             f'font-size:14px;line-height:1.4;" title="ดูภาพเต็ม">⛶</button>'
-            f'<button class="rm-btn" onclick="{_rm_onclick(name)}" '
+            f'<button class="rm-btn" '
             f'style="position:absolute;top:2px;left:2px;background:rgba(180,30,30,0.85);'
             f'color:white;border:none;border-radius:4px;padding:2px 7px;cursor:pointer;'
             f'font-size:14px;line-height:1.4;" title="ลบภาพนี้">✕</button>'
@@ -372,7 +385,8 @@ def _render_sortable_gallery_html(images: dict, order: list) -> str:
                "border-radius:50%;width:48px;height:48px;font-size:24px;"
                "cursor:pointer;z-index:3;transition:opacity 0.2s;")
 
-    return f"""
+    return (
+        f"""
 <div id="lb{uid}" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.93);
   z-index:99999;align-items:center;justify-content:center;flex-direction:column;overflow:hidden;">
   <button onclick="document.getElementById('lb{uid}').style.display='none'"
@@ -413,7 +427,9 @@ def _render_sortable_gallery_html(images: dict, order: list) -> str:
   gap:8px;max-height:460px;overflow-y:auto;padding:4px;">{items_html}</div>
 <script type="application/json" id="fi{uid}">{full_json}</script>
 <img src="gi{uid}" onerror="(function(){{
-  var fd=JSON.parse(document.getElementById('fi{uid}').textContent);
+  """
+        + _RM_HANDLER_JS
+        + f"""  var fd=JSON.parse(document.getElementById('fi{uid}').textContent);
   var _names{uid}=fd.names,_fi{uid}=fd.imgs;
   var _sc{uid}=1,_tx{uid}=0,_ty{uid}=0,_drag{uid}=false,_sx{uid}=0,_sy{uid}=0,_idx{uid}=0;
   function _applyT{uid}(){{
@@ -501,6 +517,7 @@ def _render_sortable_gallery_html(images: dict, order: list) -> str:
   }}else{{setTimeout(function(){{if(window.Sortable)go();}},300);}}
 }})();" style="display:none">
 <style>.sg2{{opacity:.5;outline:2px dashed #63b3ed;}}</style>"""
+    )
 
 
 # ── Event handlers ────────────────────────────────────────────────────────────
