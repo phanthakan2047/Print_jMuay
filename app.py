@@ -232,9 +232,9 @@ def apply_enhancements(img, sharpness, contrast, use_unsharp,
 def _rm_onclick(name: str) -> str:
     safe = name.replace("\\", "\\\\").replace("'", "\\'")
     return (
-        "(function(){var w=document.getElementById('remove_img_input');"
+        "(function(){var w=document.getElementById('sort_order_input');"
         "if(w){var t=w.querySelector('textarea')||w.querySelector('input');"
-        "if(t){t.value='" + safe + "';"
+        "if(t){t.value='__DEL__:" + safe + "';"
         "t.dispatchEvent(new Event('input',{bubbles:true}));}}})()"
     )
 
@@ -285,16 +285,20 @@ def _render_sortable_html(order: list) -> str:
 
 
 def on_sort_change(new_order_json, images_state, order_state):
+    _no_change = (gr.update(), order_state, gr.update(), gr.update(), gr.update(), gr.update())
     if not new_order_json:
-        return order_state, gr.update(), gr.update(), gr.update(), gr.update()
+        return _no_change
+    if new_order_json.startswith("__DEL__:"):
+        name = new_order_json[8:]
+        return on_remove_by_name(name, images_state, order_state)
     try:
         new_order = json.loads(new_order_json)
         new_order = [n for n in new_order if n in (images_state or {})]
         if not new_order:
-            return order_state, gr.update(), gr.update(), gr.update(), gr.update()
-        return new_order, _render_sortable_html(new_order), _render_sortable_gallery_html(images_state, new_order), gr.update(choices=new_order), _PRINT_STALE_HTML
+            return _no_change
+        return gr.update(), new_order, _render_sortable_html(new_order), _render_sortable_gallery_html(images_state, new_order), gr.update(choices=new_order), _PRINT_STALE_HTML
     except Exception:
-        return order_state, gr.update(), gr.update(), gr.update(), gr.update()
+        return _no_change
 
 
 def on_gallery_select(order_state, evt: gr.SelectData):
@@ -956,7 +960,6 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
 
             gr.Markdown("### 📋 ลำดับภาพ (ลากเพื่อเปลี่ยนลำดับ)")
             sort_order_input = gr.Textbox(visible=False, elem_id="sort_order_input", label="sort")
-            remove_img_input = gr.Textbox(visible=False, elem_id="remove_img_input", label="remove")
             order_html = gr.HTML(_render_sortable_html([]))
             select_img = gr.Dropdown(label="หรือเลือกภาพแล้วกด ↑ ↓", choices=[], interactive=True)
             with gr.Row():
@@ -1051,7 +1054,7 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
     sort_order_input.change(
         on_sort_change,
         [sort_order_input, images_state, order_state],
-        [order_state, order_html, gallery, select_img, print_html],
+        [images_state, order_state, order_html, gallery, select_img, print_html],
     )
 
     _move_outs = [order_state, order_html, gallery, select_img, print_html]
@@ -1059,10 +1062,6 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
     btn_down.click(move_down, [select_img, images_state, order_state], _move_outs)
     btn_remove.click(
         remove_image, [select_img, images_state, order_state],
-        [images_state, order_state, order_html, gallery, select_img, print_html],
-    )
-    remove_img_input.change(
-        on_remove_by_name, [remove_img_input, images_state, order_state],
         [images_state, order_state, order_html, gallery, select_img, print_html],
     )
     btn_clear.click(
