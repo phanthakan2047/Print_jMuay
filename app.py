@@ -1,5 +1,6 @@
 import base64
 import io
+import json
 import os
 import tempfile
 import zipfile
@@ -60,20 +61,64 @@ def apply_enhancements(img, sharpness, contrast, use_unsharp,
     return img
 
 
-def _render_order_html(order: list) -> str:
+def _render_sortable_html(order: list) -> str:
     if not order:
         return "<p style='color:#888;padding:8px;'>ยังไม่มีภาพ</p>"
-    rows = "".join(
-        f'<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;margin:2px 0;'
-        f'background:#1e3a5f;border-radius:6px;border-left:3px solid #63b3ed;font-size:13px;">'
-        f'<span style="background:#63b3ed;color:#0a1628;border-radius:50%;min-width:22px;height:22px;'
-        f'display:inline-flex;align-items:center;justify-content:center;font-weight:bold;font-size:11px;">'
-        f'{i+1}</span>'
-        f'<span style="flex:1;word-break:break-all;color:#e2e8f0;">{name}</span>'
+    uid = abs(hash(str(order))) % 999999
+    items = "".join(
+        f'<div class="si" data-name="{name.replace(chr(34), "&quot;")}" '
+        f'style="display:flex;align-items:center;gap:8px;padding:8px 10px;margin:3px 0;'
+        f'background:#1e3a5f;border-radius:6px;border-left:3px solid #63b3ed;'
+        f'cursor:grab;user-select:none;">'
+        f'<span class="n" style="background:#63b3ed;color:#0a1628;border-radius:50%;'
+        f'min-width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;'
+        f'font-weight:bold;font-size:11px;flex-shrink:0;">{i+1}</span>'
+        f'<span style="color:#e2e8f0;flex:1;word-break:break-all;font-size:13px;">☰ {name}</span>'
         f'</div>'
         for i, name in enumerate(order)
     )
-    return f'<div style="max-height:280px;overflow-y:auto;">{rows}</div>'
+    return f"""<div id="sc{uid}" style="max-height:300px;overflow-y:auto;padding:2px;">{items}</div>
+<style>.sg{{opacity:.5;background:#2d5a8e!important;}}</style>
+<img src="x{uid}" onerror="(function(){{
+  var go=function(){{
+    var c=document.getElementById('sc{uid}');
+    if(!c||c._s)return;c._s=true;
+    new Sortable(c,{{animation:150,draggable:'.si',ghostClass:'sg',onEnd:function(){{
+      var it=c.querySelectorAll('.si');
+      it.forEach(function(x,i){{x.querySelector('.n').textContent=i+1;}});
+      var o=Array.from(it).map(function(x){{return x.dataset.name;}});
+      var w=document.getElementById('sort_order_input');
+      if(w){{var t=w.querySelector('textarea')||w.querySelector('input');
+        if(t){{t.value=JSON.stringify(o);t.dispatchEvent(new Event('input',{{bubbles:true}}));}}}}
+    }}}});
+  }};
+  if(window.Sortable){{go();}}
+  else if(!window._sll){{window._sll=true;
+    var s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js';
+    s.onload=go;document.head.appendChild(s);
+  }}else{{setTimeout(function(){{if(window.Sortable)go();}},300);}}
+}})();" style="display:none">"""
+
+
+def on_sort_change(new_order_json, images_state, order_state):
+    if not new_order_json:
+        return order_state, gr.update(), gr.update(), gr.update()
+    try:
+        new_order = json.loads(new_order_json)
+        new_order = [n for n in new_order if n in (images_state or {})]
+        if not new_order:
+            return order_state, gr.update(), gr.update(), gr.update()
+        return new_order, _render_sortable_html(new_order), _make_gallery(images_state, new_order), gr.update(choices=new_order)
+    except Exception:
+        return order_state, gr.update(), gr.update(), gr.update()
+
+
+def on_gallery_select(order_state, evt: gr.SelectData):
+    idx = evt.index
+    if order_state and 0 <= idx < len(order_state):
+        return gr.update(value=order_state[idx])
+    return gr.update()
 
 
 def _make_gallery(images: dict, order: list) -> list:
@@ -89,7 +134,7 @@ def _make_gallery(images: dict, order: list) -> list:
 # ── Event handlers ────────────────────────────────────────────────────────────
 def on_upload(files, images_state, order_state):
     if not files:
-        return {}, [], _render_order_html([]), [], gr.update(choices=[], value=None)
+        return {}, [], _render_sortable_html([]), [], gr.update(choices=[], value=None)
 
     images = dict(images_state) if images_state else {}
     for f in files:
@@ -112,7 +157,7 @@ def on_upload(files, images_state, order_state):
     return (
         images,
         order,
-        _render_order_html(order),
+        _render_sortable_html(order),
         _make_gallery(images, order),
         gr.update(choices=order, value=order[0] if order else None),
     )
@@ -124,7 +169,7 @@ def move_up(selected, images_state, order_state):
         i = order.index(selected)
         if i > 0:
             order[i], order[i - 1] = order[i - 1], order[i]
-    return order, _render_order_html(order), _make_gallery(images_state, order), gr.update(choices=order, value=selected)
+    return order, _render_sortable_html(order), _make_gallery(images_state, order), gr.update(choices=order, value=selected)
 
 
 def move_down(selected, images_state, order_state):
@@ -133,7 +178,7 @@ def move_down(selected, images_state, order_state):
         i = order.index(selected)
         if i < len(order) - 1:
             order[i], order[i + 1] = order[i + 1], order[i]
-    return order, _render_order_html(order), _make_gallery(images_state, order), gr.update(choices=order, value=selected)
+    return order, _render_sortable_html(order), _make_gallery(images_state, order), gr.update(choices=order, value=selected)
 
 
 def remove_image(selected, images_state, order_state):
@@ -144,13 +189,13 @@ def remove_image(selected, images_state, order_state):
         images.pop(selected, None)
     new_sel = order[0] if order else None
     return (
-        images, order, _render_order_html(order),
+        images, order, _render_sortable_html(order),
         _make_gallery(images, order), gr.update(choices=order, value=new_sel),
     )
 
 
 def clear_all():
-    return {}, [], _render_order_html([]), [], gr.update(choices=[], value=None), None, ""
+    return {}, [], _render_sortable_html([]), [], gr.update(choices=[], value=None), None, ""
 
 
 def generate(
@@ -352,9 +397,10 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
             )
             btn_clear = gr.Button("🗑️ ล้างทั้งหมด", size="sm")
 
-            gr.Markdown("### 📋 ลำดับภาพ")
-            order_html = gr.HTML(_render_order_html([]))
-            select_img = gr.Dropdown(label="เลือกภาพที่จะจัดลำดับ", choices=[], interactive=True)
+            gr.Markdown("### 📋 ลำดับภาพ (ลากเพื่อเปลี่ยนลำดับ)")
+            sort_order_input = gr.Textbox(visible=False, elem_id="sort_order_input", label="sort")
+            order_html = gr.HTML(_render_sortable_html([]))
+            select_img = gr.Dropdown(label="หรือเลือกภาพแล้วกด ↑ ↓", choices=[], interactive=True)
             with gr.Row():
                 btn_up = gr.Button("↑ ขึ้น", size="sm")
                 btn_down = gr.Button("↓ ลง", size="sm")
@@ -426,6 +472,14 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
 
     _upload_outs = [images_state, order_state, order_html, gallery, select_img]
     file_input.change(on_upload, [file_input, images_state, order_state], _upload_outs)
+
+    sort_order_input.change(
+        on_sort_change,
+        [sort_order_input, images_state, order_state],
+        [order_state, order_html, gallery, select_img],
+    )
+
+    gallery.select(on_gallery_select, [order_state], select_img)
 
     _move_outs = [order_state, order_html, gallery, select_img]
     btn_up.click(move_up, [select_img, images_state, order_state], _move_outs)
