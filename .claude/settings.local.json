@@ -11,7 +11,8 @@
       "Bash(python -c ' *)",
       "Bash(python -c \"import ast; ast.parse\\(open\\('d:/Print_jMuay/app.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
       "Bash(git commit -m 'Fix X delete buttons via delegated click listener *)",
-      "Bash(git commit -m 'Fix X delete buttons: self-contained onclick on each button *)"
+      "Bash(git commit -m 'Fix X delete buttons: self-contained onclick on each button *)",
+      "Bash(git commit *)"
     ]
   }
 }
