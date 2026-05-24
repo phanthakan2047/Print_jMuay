@@ -180,19 +180,6 @@ def _delete_all_sessions() -> str:
         return f"❌ ลบไม่สำเร็จ: {e}"
 
 
-def _hist_action_js(action: str, sid: int, confirm_msg: str = "") -> str:
-    inner = (
-        "(function(){var w=document.getElementById('sort_order_input');"
-        "if(w){var t=w.querySelector('textarea')||w.querySelector('input');"
-        "if(t){t.value='__HIST_" + action.upper() + "__:" + str(sid) + "_'+Date.now();"
-        "t.dispatchEvent(new Event('input',{bubbles:true}));"
-        "t.dispatchEvent(new Event('change',{bubbles:true}));}}})()"
-    )
-    if confirm_msg:
-        safe = confirm_msg.replace("'", "\\'")
-        return "if(confirm('" + safe + "')){" + inner + "}"
-    return inner
-
 
 def _render_history_html(sessions: list) -> str:
     if not db:
@@ -203,6 +190,8 @@ def _render_history_html(sessions: list) -> str:
                 "ตรวจสอบ SUPABASE_URL และ SUPABASE_KEY ใน environment variables</p></div>")
     if not sessions:
         return "<p style='color:#888;padding:8px;text-align:center;'>ยังไม่มีประวัติที่บันทึกไว้</p>"
+    uid = abs(hash(str([s["id"] for s in sessions]))) % 999999
+    container_id = f"hlist{uid}"
     items = []
     for s in sessions:
         sid = s["id"]
@@ -217,8 +206,7 @@ def _render_history_html(sessions: list) -> str:
         )
         if count > 6:
             thumb_html += f'<span style="color:#a0aec0;font-size:11px;align-self:center;">+{count-6}</span>'
-        load_js = _hist_action_js("restore", sid)
-        del_js = _hist_action_js("del", sid, f"ลบ session {created}?")
+        safe_confirm = f"ลบ session {created}?".replace('"', "&quot;")
         items.append(
             f'<div style="background:#1a2a3a;border-radius:8px;padding:10px;margin-bottom:8px;'
             f'border:1px solid #2d4a6b;">'
@@ -229,10 +217,10 @@ def _render_history_html(sessions: list) -> str:
             f'<div style="display:flex;gap:3px;margin-top:5px;flex-wrap:wrap;">{thumb_html}</div>'
             f'</div>'
             f'<div style="display:flex;gap:5px;flex-shrink:0;margin-top:2px;">'
-            f'<button onclick="{load_js}"'
+            f'<button data-hist-action="restore" data-hist-sid="{sid}"'
             f' style="padding:4px 10px;background:#1a56a0;color:white;border:none;'
             f'border-radius:6px;font-size:12px;cursor:pointer;">📂 โหลด</button>'
-            f'<button onclick="{del_js}"'
+            f'<button data-hist-action="del" data-hist-sid="{sid}" data-hist-confirm="{safe_confirm}"'
             f' style="padding:4px 10px;background:#9b2335;color:white;border:none;'
             f'border-radius:6px;font-size:12px;cursor:pointer;">🗑️</button>'
             f'</div></div></div>'
@@ -241,7 +229,26 @@ def _render_history_html(sessions: list) -> str:
     warn_style = "color:#f6ad55;" if cnt >= SESSION_LIMIT - 3 else "color:#a0aec0;"
     header = (f"<p style='{warn_style}font-size:12px;margin-bottom:8px;'>"
               f"{'⚠️ ใกล้เต็ม! ' if cnt >= SESSION_LIMIT - 3 else ''}ประวัติ {cnt} / {SESSION_LIMIT}</p>")
-    return header + "".join(items)
+    script = (
+        f"<img src='xhi{uid}' onerror=\"(function(){{"
+        f"var c=document.getElementById('{container_id}');"
+        f"if(!c||c._hi)return;c._hi=true;"
+        f"c.addEventListener('click',function(e){{"
+        f"var btn=e.target.closest('[data-hist-action]');"
+        f"if(!btn)return;"
+        f"var act=btn.dataset.histAction;"
+        f"var sid=btn.dataset.histSid;"
+        f"var cm=btn.dataset.histConfirm;"
+        f"if(cm&&!confirm(cm))return;"
+        f"var w=document.getElementById('sort_order_input');"
+        f"var t=w&&(w.querySelector('textarea')||w.querySelector('input'));"
+        f"if(t){{t.value='__HIST_'+act.toUpperCase()+'__:'+sid+'_'+Date.now();"
+        f"t.dispatchEvent(new Event('input',{{bubbles:true}}));"
+        f"t.dispatchEvent(new Event('change',{{bubbles:true}}));}}"
+        f"}});"
+        f"}})()\" style='display:none'/>"
+    )
+    return script + header + f"<div id='{container_id}'>" + "".join(items) + "</div>"
 
 
 # ── Image helpers ─────────────────────────────────────────────────────────────
