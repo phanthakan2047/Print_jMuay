@@ -37,10 +37,28 @@ SESSION_LIMIT = 20
 
 _RM_ONCLICK_JS = (
     "(function(n){"
+    "var area=document.getElementById('file_upload_area');"
+    "if(area){"
+    "var els=area.querySelectorAll('a,span,div');"
+    "for(var i=0;i<els.length;i++){"
+    "var el=els[i],ok=false;"
+    "try{"
+    "ok=el.getAttribute('download')===n||el.getAttribute('title')===n"
+    "||(el.children.length===0&&el.textContent.trim()===n);"
+    "if(!ok){var h=el.getAttribute('href');"
+    "ok=!!h&&decodeURIComponent(h.split('/').pop())===n;}"
+    "}catch(e){}"
+    "if(ok){"
+    "var row=el,btn=null;"
+    "for(var k=0;k<6&&row&&row!==area;k++){"
+    "btn=row.querySelector('button');if(btn)break;row=row.parentElement;}"
+    "if(btn){btn.click();return;}"
+    "}"
+    "}"
+    "}"
     "var w=document.getElementById('sort_order_input');"
     "var t=w&&(w.querySelector('textarea')||w.querySelector('input'));"
-    "if(t){"
-    "t.value='__DEL__:'+n+'\\t'+Date.now();"
+    "if(t){t.value='__DEL__:'+n+'_'+Date.now();"
     "t.dispatchEvent(new Event('input',{bubbles:true}));"
     "t.dispatchEvent(new Event('change',{bubbles:true}));}"
     "})(this.dataset.del)"
@@ -292,7 +310,7 @@ def on_sort_change(new_order_json, images_state, order_state, current_files):
     if not new_order_json:
         return _no_change
     if new_order_json.startswith("__DEL__:"):
-        name = new_order_json[8:].split('\t')[0]
+        name = new_order_json[8:].rsplit('_', 1)[0]
         return on_remove_by_name(name, images_state, order_state, current_files)
     try:
         new_order = json.loads(new_order_json)
