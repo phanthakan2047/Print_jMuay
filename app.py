@@ -572,8 +572,9 @@ def make_print_html(images_state, order_state, print_paper, print_orient, print_
     if not ordered:
         return "<p style='color:#888'>ไม่มีภาพ</p>"
 
-    sizes = {"A4": (1240, 1754), "A3": (1754, 2481), "Letter": (1275, 1650)}
-    pw, ph = sizes.get(print_paper, (1240, 1754))
+    # Use higher resolution for print quality
+    sizes = {"A4": (1654, 2339), "A3": (2339, 3307), "Letter": (1700, 2200)}
+    pw, ph = sizes.get(print_paper, (1654, 2339))
     if print_orient == "แนวนอน":
         pw, ph = ph, pw
 
@@ -587,50 +588,69 @@ def make_print_html(images_state, order_state, print_paper, print_orient, print_
 
     orient_css = "portrait" if print_orient == "แนวตั้ง" else "landscape"
     uid = abs(hash(str([n for n, _ in ordered]))) % 999999
-    pd_json = json.dumps({"imgs": img_b64s, "paper": print_paper, "orient": orient_css})
 
-    return f"""<script type="application/json" id="pd{uid}">{pd_json}</script>
-<img src="px{uid}" onerror="(function(){{
-  var fd=JSON.parse(document.getElementById('pd{uid}').textContent);
-  window._print{uid}=function(){{
-    var n=fd.imgs.length,body='',i;
-    for(i=0;i<n;i++){{
-      var pb=i<n-1?'page-break-after:always;':'';
-      body+='<div style=\\''+pb+'text-align:center;padding:4mm;\\'>'
-           +'<img src=\\'data:image/jpeg;base64,'+fd.imgs[i]+'\\'>'
-           +'</div>';
-    }}
-    var h='<!DOCTYPE html><html><head><meta charset=\\'utf-8\\'>'
-      +'<style>body{{margin:0;padding:0;background:white}}'
-      +'@page{{size:'+fd.paper+' '+fd.orient+';margin:10mm}}</style>'
-      +'</head><body>'+body+'</body></html>';
-    var blob=new Blob([h],{{type:'text/html;charset=utf-8'}});
+    # Build the full print HTML entirely on the Python side.
+    # Each image gets its own page, fitted to the paper with no margins.
+    pages_html = "".join(
+        f'<div class="p"><img src="data:image/jpeg;base64,{b64}"/></div>'
+        for b64 in img_b64s
+    )
+    print_html = (
+        '<!DOCTYPE html><html><head>'
+        '<meta charset="utf-8">'
+        '<style>'
+        '*{margin:0;padding:0;box-sizing:border-box}'
+        'html,body{background:white}'
+        f'@page{{size:{print_paper} {orient_css};margin:0}}'
+        '.p{width:100vw;height:100vh;display:flex;align-items:center;'
+        'justify-content:center;page-break-after:always;overflow:hidden}'
+        '.p:last-child{page-break-after:auto}'
+        'img{max-width:100%;max-height:100%;object-fit:contain;display:block}'
+        '</style>'
+        # Auto-open print dialog when the tab loads
+        '<script>window.addEventListener("load",function(){'
+        'setTimeout(function(){window.print();},500);'
+        '});</script>'
+        '</head><body>' + pages_html + '</body></html>'
+    )
+
+    # Base64-encode the whole HTML so it can be safely stored in a DOM text node
+    # and decoded client-side without any quote-escaping issues.
+    html_b64 = base64.b64encode(print_html.encode('utf-8')).decode()
+
+    # The onclick is single-quoted, so JS strings inside use double quotes freely.
+    # html_b64 is pure [A-Za-z0-9+/=] — safe as a DOM text node, no escaping needed.
+    return f"""<div id='phb{uid}' style='display:none'>{html_b64}</div>
+<div style='background:#162032;border-radius:10px;padding:14px;border:1px solid #2d4a6b;margin-top:4px;'>
+  <p style='color:#68d391;font-weight:700;margin-bottom:10px;text-align:center;font-size:14px;'>
+    ✅ เตรียมพร้อมแล้ว {len(ordered)} ภาพ &nbsp;|&nbsp; {print_paper} · {orient_css}
+  </p>
+  <button onclick='(function(){{
+    var b=document.getElementById("phb{uid}").textContent.trim();
+    var s=atob(b),arr=new Uint8Array(s.length),i;
+    for(i=0;i<s.length;i++)arr[i]=s.charCodeAt(i);
+    var blob=new Blob([arr],{{type:"text/html;charset=utf-8"}});
     var url=URL.createObjectURL(blob);
-    var fr=document.createElement('iframe');
-    fr.style.cssText='position:fixed;left:-9999px;top:0;width:1px;height:1px;border:none';
-    document.body.appendChild(fr);
-    fr.onload=function(){{
-      try{{fr.contentWindow.focus();fr.contentWindow.print();}}
-      catch(ex){{
-        var a=document.createElement('a');
-        a.href=url;a.target='_blank';a.click();
-      }}
-      setTimeout(function(){{
-        try{{document.body.removeChild(fr);}}catch(e){{}}
-        URL.revokeObjectURL(url);
-      }},60000);
-    }};
-    fr.src=url;
-  }};
-}})();" style="display:none">
-<button onclick="window._print{uid}&&window._print{uid}()"
-  style="width:100%;padding:12px;background:#1f4e79;color:white;border:none;
-  border-radius:8px;font-size:15px;font-weight:bold;cursor:pointer;margin-top:4px;">
-  🖨️ สั่งพิมพ์เลย ({len(ordered)} ภาพ)
-</button>
-<p style="text-align:center;font-size:12px;color:#888;margin-top:4px;">
-  กดปุ่มด้านบน → หน้าต่างพิมพ์จะเปิดขึ้น → กด Ctrl+P เพื่อพิมพ์
-</p>"""
+    var w=window.open(url,"_blank");
+    if(!w){{
+      var a=document.createElement("a");
+      a.href=url;a.target="_blank";a.rel="noopener";
+      document.body.appendChild(a);a.click();document.body.removeChild(a);
+    }}
+    setTimeout(function(){{URL.revokeObjectURL(url);}},300000);
+  }})()'
+  style='width:100%;padding:14px;background:#1a56a0;color:white;border:none;
+  border-radius:8px;font-size:15px;font-weight:bold;cursor:pointer;
+  margin-bottom:10px;display:block;text-align:center;'>
+    🖨️ เปิดหน้าพิมพ์ + เลือกเครื่องพิมพ์  ({len(ordered)} ภาพ)
+  </button>
+  <div style='font-size:11px;color:#a0aec0;line-height:1.7;'>
+    <p>① กดปุ่มด้านบน → แท็บใหม่เปิดขึ้น</p>
+    <p>② กล่องเลือกเครื่องพิมพ์เปิดอัตโนมัติ → เลือกเครื่อง → กด <b>พิมพ์</b></p>
+    <p>③ แต่ละภาพพิมพ์ 1 ภาพต่อหน้า จัดเต็มพื้นที่กระดาษ</p>
+    <p style='color:#718096;margin-top:4px;'>หากป๊อปอัพถูกบล็อก: อนุญาต pop-up ใน browser แล้วกดอีกครั้ง</p>
+  </div>
+</div>"""
 
 
 # ── Gradio UI ─────────────────────────────────────────────────────────────────
