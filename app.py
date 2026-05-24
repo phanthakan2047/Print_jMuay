@@ -33,6 +33,175 @@ def _save_to_db(fmt: str, count: int, size_kb: float, filename: str, enhancement
         pass
 
 
+SESSION_LIMIT = 20
+
+_PRINT_STALE_HTML = ("<div style='background:#2d1a00;border:1px solid #c05621;border-radius:8px;"
+                     "padding:10px 14px;margin-top:4px;'>"
+                     "<p style='color:#f6ad55;font-weight:700;margin:0;'>"
+                     "⚠️ มีการเปลี่ยนแปลงภาพ — กรุณากด <b>\"เตรียมปุ่มพิมพ์\"</b> ใหม่ก่อนสั่งพิมพ์"
+                     "</p></div>")
+
+
+def _session_count() -> int:
+    if not db:
+        return 0
+    try:
+        res = db.table("image_sessions").select("id", count="exact").execute()
+        return res.count or 0
+    except Exception:
+        return 0
+
+
+def _save_session(images: dict, order: list, settings: dict, auto_delete: bool) -> str:
+    if not db:
+        return "⚠️ ไม่ได้เชื่อมต่อ Supabase"
+    count = _session_count()
+    if count >= SESSION_LIMIT:
+        if auto_delete:
+            try:
+                oldest = db.table("image_sessions").select("id").order("created_at").limit(1).execute()
+                if oldest.data:
+                    db.table("image_sessions").delete().eq("id", oldest.data[0]["id"]).execute()
+            except Exception:
+                pass
+        else:
+            return f"⚠️ ประวัติเต็มแล้ว ({SESSION_LIMIT} sessions) กรุณาลบประวัติเก่าก่อนบันทึก"
+    thumbnails = {}
+    image_data = {}
+    for name in order:
+        if name not in images:
+            continue
+        img = images[name]
+        thumb = img.copy()
+        thumb.thumbnail((120, 120), Image.LANCZOS)
+        buf = io.BytesIO()
+        prep_rgb(thumb).save(buf, format="JPEG", quality=70)
+        thumbnails[name] = base64.b64encode(buf.getvalue()).decode()
+        buf2 = io.BytesIO()
+        prep_rgb(img).save(buf2, format="JPEG", quality=92)
+        image_data[name] = base64.b64encode(buf2.getvalue()).decode()
+    try:
+        db.table("image_sessions").insert({
+            "image_names": order,
+            "thumbnails": thumbnails,
+            "image_data": image_data,
+            "settings": settings,
+        }).execute()
+        new_count = _session_count()
+        warn = f" ⚠️ ใกล้เต็ม ({new_count}/{SESSION_LIMIT})" if new_count >= SESSION_LIMIT - 3 else ""
+        return f"✅ บันทึกแล้ว ({len(order)} ภาพ){warn}"
+    except Exception as e:
+        return f"❌ บันทึกไม่สำเร็จ: {e}"
+
+
+def _load_sessions() -> list:
+    if not db:
+        return []
+    try:
+        res = (db.table("image_sessions")
+               .select("id,created_at,image_names,thumbnails,settings")
+               .order("created_at", desc=True)
+               .limit(SESSION_LIMIT)
+               .execute())
+        return res.data or []
+    except Exception:
+        return []
+
+
+def _restore_session(sid: int):
+    if not db:
+        return None, None, "⚠️ ไม่ได้เชื่อมต่อ Supabase"
+    try:
+        res = (db.table("image_sessions")
+               .select("image_names,image_data")
+               .eq("id", sid)
+               .limit(1)
+               .execute())
+        if not res.data:
+            return None, None, "❌ ไม่พบ session"
+        row = res.data[0]
+        order = row["image_names"] or []
+        image_data_map = row["image_data"] or {}
+        images = {}
+        for name in order:
+            if name in image_data_map:
+                buf = io.BytesIO(base64.b64decode(image_data_map[name]))
+                img = Image.open(buf)
+                img.load()
+                images[name] = img
+        return images, order, f"✅ โหลดแล้ว ({len(order)} ภาพ)"
+    except Exception as e:
+        return None, None, f"❌ โหลดไม่สำเร็จ: {e}"
+
+
+def _delete_session(sid: int) -> str:
+    if not db:
+        return "⚠️ ไม่ได้เชื่อมต่อ Supabase"
+    try:
+        db.table("image_sessions").delete().eq("id", sid).execute()
+        return "✅ ลบแล้ว"
+    except Exception as e:
+        return f"❌ ลบไม่สำเร็จ: {e}"
+
+
+def _delete_all_sessions() -> str:
+    if not db:
+        return "⚠️ ไม่ได้เชื่อมต่อ Supabase"
+    try:
+        db.table("image_sessions").delete().neq("id", 0).execute()
+        return "✅ ลบประวัติทั้งหมดแล้ว"
+    except Exception as e:
+        return f"❌ ลบไม่สำเร็จ: {e}"
+
+
+def _render_history_html(sessions: list) -> str:
+    if not sessions:
+        return "<p style='color:#888;padding:8px;text-align:center;'>ยังไม่มีประวัติที่บันทึกไว้</p>"
+    items = []
+    for s in sessions:
+        sid = s["id"]
+        created = (s.get("created_at") or "")[:16].replace("T", " ")
+        names = s.get("image_names") or []
+        thumbs = s.get("thumbnails") or {}
+        count = len(names)
+        thumb_html = "".join(
+            f'<img src="data:image/jpeg;base64,{thumbs[n]}" '
+            f'style="width:38px;height:38px;object-fit:cover;border-radius:3px;border:1px solid #2d4a6b;"/>'
+            for n in names[:6] if n in thumbs
+        )
+        if count > 6:
+            thumb_html += f'<span style="color:#a0aec0;font-size:11px;align-self:center;">+{count-6}</span>'
+        rp = json.dumps({"action": "restore", "id": sid}).replace('"', '&quot;')
+        dp = json.dumps({"action": "delete", "id": sid}).replace('"', '&quot;')
+        items.append(
+            f'<div style="background:#1a2a3a;border-radius:8px;padding:10px;margin-bottom:8px;'
+            f'border:1px solid #2d4a6b;">'
+            f'<div style="display:flex;align-items:flex-start;gap:8px;">'
+            f'<div style="flex:1;min-width:0;">'
+            f'<div style="color:#e2e8f0;font-size:12px;font-weight:600;">🕐 {created}'
+            f' &nbsp;<span style="color:#63b3ed;">{count} ภาพ</span></div>'
+            f'<div style="display:flex;gap:3px;margin-top:5px;flex-wrap:wrap;">{thumb_html}</div>'
+            f'</div>'
+            f'<div style="display:flex;gap:5px;flex-shrink:0;margin-top:2px;">'
+            f'<button onclick="(function(){{var w=document.getElementById(\'history_action_input\');'
+            f'if(w){{var t=w.querySelector(\'textarea\')||w.querySelector(\'input\');'
+            f'if(t){{t.value=\'{rp}\';t.dispatchEvent(new Event(\'input\',{{bubbles:true}}));}}}}}})();"'
+            f' style="padding:4px 10px;background:#1a56a0;color:white;border:none;'
+            f'border-radius:6px;font-size:12px;cursor:pointer;">📂 โหลด</button>'
+            f'<button onclick="if(confirm(\'ลบ session {created}?\')){{(function(){{var w=document.getElementById(\'history_action_input\');'
+            f'if(w){{var t=w.querySelector(\'textarea\')||w.querySelector(\'input\');'
+            f'if(t){{t.value=\'{dp}\';t.dispatchEvent(new Event(\'input\',{{bubbles:true}}));}}}}}})();}}"'
+            f' style="padding:4px 10px;background:#9b2335;color:white;border:none;'
+            f'border-radius:6px;font-size:12px;cursor:pointer;">🗑️</button>'
+            f'</div></div></div>'
+        )
+    cnt = len(sessions)
+    warn_style = "color:#f6ad55;" if cnt >= SESSION_LIMIT - 3 else "color:#a0aec0;"
+    header = (f"<p style='{warn_style}font-size:12px;margin-bottom:8px;'>"
+              f"{'⚠️ ใกล้เต็ม! ' if cnt >= SESSION_LIMIT - 3 else ''}ประวัติ {cnt} / {SESSION_LIMIT}</p>")
+    return header + "".join(items)
+
+
 # ── Image helpers ─────────────────────────────────────────────────────────────
 def _hex_to_rgb(hex_color: str) -> tuple:
     h = hex_color.lstrip("#")
@@ -102,15 +271,15 @@ def _render_sortable_html(order: list) -> str:
 
 def on_sort_change(new_order_json, images_state, order_state):
     if not new_order_json:
-        return order_state, gr.update(), gr.update(), gr.update()
+        return order_state, gr.update(), gr.update(), gr.update(), gr.update()
     try:
         new_order = json.loads(new_order_json)
         new_order = [n for n in new_order if n in (images_state or {})]
         if not new_order:
-            return order_state, gr.update(), gr.update(), gr.update()
-        return new_order, _render_sortable_html(new_order), _render_sortable_gallery_html(images_state, new_order), gr.update(choices=new_order)
+            return order_state, gr.update(), gr.update(), gr.update(), gr.update()
+        return new_order, _render_sortable_html(new_order), _render_sortable_gallery_html(images_state, new_order), gr.update(choices=new_order), _PRINT_STALE_HTML
     except Exception:
-        return order_state, gr.update(), gr.update(), gr.update()
+        return order_state, gr.update(), gr.update(), gr.update(), gr.update()
 
 
 def on_gallery_select(order_state, evt: gr.SelectData):
@@ -340,6 +509,7 @@ def on_upload(files, images_state, order_state):
         _render_sortable_html(order),
         _render_sortable_gallery_html(images, order),
         gr.update(choices=order, value=order[0] if order else None),
+        _PRINT_STALE_HTML,
     )
 
 
@@ -349,7 +519,7 @@ def move_up(selected, images_state, order_state):
         i = order.index(selected)
         if i > 0:
             order[i], order[i - 1] = order[i - 1], order[i]
-    return order, _render_sortable_html(order), _render_sortable_gallery_html(images_state, order), gr.update(choices=order, value=selected)
+    return order, _render_sortable_html(order), _render_sortable_gallery_html(images_state, order), gr.update(choices=order, value=selected), _PRINT_STALE_HTML
 
 
 def move_down(selected, images_state, order_state):
@@ -358,7 +528,7 @@ def move_down(selected, images_state, order_state):
         i = order.index(selected)
         if i < len(order) - 1:
             order[i], order[i + 1] = order[i + 1], order[i]
-    return order, _render_sortable_html(order), _render_sortable_gallery_html(images_state, order), gr.update(choices=order, value=selected)
+    return order, _render_sortable_html(order), _render_sortable_gallery_html(images_state, order), gr.update(choices=order, value=selected), _PRINT_STALE_HTML
 
 
 def remove_image(selected, images_state, order_state):
@@ -371,11 +541,12 @@ def remove_image(selected, images_state, order_state):
     return (
         images, order, _render_sortable_html(order),
         _render_sortable_gallery_html(images, order), gr.update(choices=order, value=new_sel),
+        _PRINT_STALE_HTML,
     )
 
 
 def clear_all():
-    return {}, [], _render_sortable_html([]), _render_sortable_gallery_html({}, []), gr.update(choices=[], value=None), "", ""
+    return {}, [], _render_sortable_html([]), _render_sortable_gallery_html({}, []), gr.update(choices=[], value=None), "", "", _PRINT_STALE_HTML
 
 
 def generate(
@@ -599,6 +770,27 @@ def make_print_html(images_state, order_state, print_paper, print_orient, print_
         for b64 in img_b64s
     )
 
+    # Build print preview thumbnails (A4-ratio cards)
+    preview_cards = []
+    for i, ((name, _), b64) in enumerate(zip(ordered, img_b64s)):
+        safe = name.replace('"', "&quot;")
+        preview_cards.append(
+            f'<div style="display:flex;flex-direction:column;align-items:center;gap:4px;">'
+            f'<div style="background:#0a1628;border:1px solid #2d4a6b;border-radius:4px;'
+            f'width:72px;height:102px;display:flex;align-items:center;justify-content:center;overflow:hidden;">'
+            f'<img src="data:image/jpeg;base64,{b64}" '
+            f'style="max-width:100%;max-height:100%;object-fit:contain;" title="{safe}"/>'
+            f'</div>'
+            f'<span style="font-size:10px;color:#a0aec0;">{i+1}</span>'
+            f'</div>'
+        )
+    preview_grid = (
+        f'<p style="color:#a0aec0;font-size:11px;margin:0 0 6px;">ตัวอย่างการจัดเรียง ({len(ordered)} ภาพ):</p>'
+        f'<div style="display:flex;flex-wrap:wrap;gap:6px;max-height:200px;overflow-y:auto;'
+        f'padding:6px;background:#0d1e30;border-radius:6px;border:1px solid #1e3a5f;margin-bottom:10px;">'
+        + "".join(preview_cards) + "</div>"
+    )
+
     # onclick: move overlay to direct body child → CSS body.prnt{uid} > *:not(overlay)
     # hides all Gradio UI → page-break works in normal block flow → one image per page.
     # onafterprint moves overlay back and removes class.
@@ -622,6 +814,7 @@ def make_print_html(images_state, order_state, print_paper, print_orient, print_
   <p style="color:#68d391;font-weight:700;margin-bottom:10px;text-align:center;font-size:14px;">
     ✅ เตรียมพร้อมแล้ว {len(ordered)} ภาพ &nbsp;|&nbsp; {print_paper} · {orient_css}
   </p>
+  {preview_grid}
   <button onclick="var o=document.getElementById('pro{uid}'),op=o.parentNode,ns=o.nextSibling;document.body.appendChild(o);o.style.display='block';document.body.classList.add('prnt{uid}');var done=function(){{document.body.classList.remove('prnt{uid}');o.style.display='none';try{{ns?op.insertBefore(o,ns):op.appendChild(o);}}catch(e){{}}window.onafterprint=null;}};window.onafterprint=done;setTimeout(done,180000);window.print();"
     style="width:100%;padding:14px;background:#1a56a0;color:white;border:none;
     border-radius:8px;font-size:15px;font-weight:bold;cursor:pointer;
@@ -634,6 +827,59 @@ def make_print_html(images_state, order_state, print_paper, print_orient, print_
     <p>③ ทีละ 1 ภาพต่อหน้า จัดให้เต็มพื้นที่กระดาษ</p>
   </div>
 </div>"""
+
+
+def on_history_action(action_json, images_state, order_state, auto_delete):
+    sessions = _load_sessions()
+    history_html = _render_history_html(sessions)
+    if not action_json:
+        return gr.update(), history_html, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+    try:
+        payload = json.loads(action_json)
+    except Exception:
+        return gr.update(), history_html, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+
+    action = payload.get("action")
+
+    if action == "save":
+        settings = payload.get("settings", {})
+        msg = _save_session(images_state or {}, order_state or [], settings, bool(auto_delete))
+        sessions = _load_sessions()
+        status = f"<p style='color:#{'f6ad55' if '⚠️' in msg else ('c53030' if '❌' in msg else '68d391')};font-size:13px;'>{msg}</p>"
+        return status, _render_history_html(sessions), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+
+    elif action == "restore":
+        sid = int(payload.get("id", 0))
+        new_images, new_order, msg = _restore_session(sid)
+        if new_images is None:
+            status = f"<p style='color:#c53030;font-size:13px;'>{msg}</p>"
+            return status, history_html, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+        status = f"<p style='color:#68d391;font-size:13px;'>{msg}</p>"
+        return (status, history_html,
+                new_images, new_order,
+                _render_sortable_html(new_order),
+                _render_sortable_gallery_html(new_images, new_order),
+                gr.update(choices=new_order, value=new_order[0] if new_order else None),
+                _PRINT_STALE_HTML)
+
+    elif action == "delete":
+        sid = int(payload.get("id", 0))
+        msg = _delete_session(sid)
+        sessions = _load_sessions()
+        status = f"<p style='color:#{'c53030' if '❌' in msg else '68d391'};font-size:13px;'>{msg}</p>"
+        return status, _render_history_html(sessions), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+
+    elif action == "delete_all":
+        msg = _delete_all_sessions()
+        sessions = _load_sessions()
+        status = f"<p style='color:#{'c53030' if '❌' in msg else '68d391'};font-size:13px;'>{msg}</p>"
+        return status, _render_history_html(sessions), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+
+    elif action == "refresh":
+        sessions = _load_sessions()
+        return gr.update(), _render_history_html(sessions), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
+
+    return gr.update(), history_html, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
 
 
 # ── Gradio UI ─────────────────────────────────────────────────────────────────
@@ -724,6 +970,22 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
             btn_print_prep = gr.Button("⚙️ เตรียมปุ่มพิมพ์", size="sm")
             print_html = gr.HTML("<p style='color:#888;'>กดปุ่มด้านบนเพื่อเตรียมพิมพ์</p>")
 
+            gr.Markdown("---")
+            with gr.Accordion("📚 ประวัติ (Sessions)", open=False):
+                with gr.Row():
+                    btn_save_session = gr.Button("💾 บันทึก Session ปัจจุบัน", size="sm", variant="primary")
+                    btn_refresh_history = gr.Button("🔄 รีเฟรช", size="sm")
+                    btn_delete_all_sessions = gr.Button("🗑️ ลบทั้งหมด", size="sm", variant="stop")
+                auto_delete_cb = gr.Checkbox(
+                    label="ลบประวัติเก่าสุดอัตโนมัติเมื่อเต็ม (ไม่ถาม)",
+                    value=False,
+                )
+                history_action_input = gr.Textbox(
+                    visible=False, elem_id="history_action_input", label="history_action"
+                )
+                history_status = gr.HTML()
+                history_html_out = gr.HTML(_render_history_html([]))
+
     # ── Event wiring ──────────────────────────────────────────────────────────
     use_unsharp.change(lambda v: gr.update(visible=v), use_unsharp, unsharp_group)
 
@@ -735,25 +997,25 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
         )
     output_format.change(_toggle_format, output_format, [pdf_settings, img_settings, zip_settings])
 
-    _upload_outs = [images_state, order_state, order_html, gallery, select_img]
-    file_input.change(on_upload, [file_input, images_state, order_state], _upload_outs)
+    _img_change_outs = [images_state, order_state, order_html, gallery, select_img, print_html]
+    file_input.change(on_upload, [file_input, images_state, order_state], _img_change_outs)
 
     sort_order_input.change(
         on_sort_change,
         [sort_order_input, images_state, order_state],
-        [order_state, order_html, gallery, select_img],
+        [order_state, order_html, gallery, select_img, print_html],
     )
 
-    _move_outs = [order_state, order_html, gallery, select_img]
+    _move_outs = [order_state, order_html, gallery, select_img, print_html]
     btn_up.click(move_up, [select_img, images_state, order_state], _move_outs)
     btn_down.click(move_down, [select_img, images_state, order_state], _move_outs)
     btn_remove.click(
         remove_image, [select_img, images_state, order_state],
-        [images_state, order_state, order_html, gallery, select_img],
+        [images_state, order_state, order_html, gallery, select_img, print_html],
     )
     btn_clear.click(
         clear_all, [],
-        [images_state, order_state, order_html, gallery, select_img, status_html, preview_result],
+        [images_state, order_state, order_html, gallery, select_img, status_html, preview_result, print_html],
     )
 
     btn_generate.click(
@@ -774,6 +1036,31 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
         make_print_html,
         [images_state, order_state, print_paper, print_orient, print_quality],
         print_html,
+    )
+
+    # History wiring
+    _hist_outs = [history_status, history_html_out,
+                  images_state, order_state, order_html, gallery, select_img, print_html]
+
+    def _save_click(images_state, order_state, auto_delete):
+        payload = json.dumps({"action": "save", "settings": {}})
+        return on_history_action(payload, images_state, order_state, auto_delete)
+
+    def _refresh_click(images_state, order_state, auto_delete):
+        payload = json.dumps({"action": "refresh"})
+        return on_history_action(payload, images_state, order_state, auto_delete)
+
+    def _delete_all_click(images_state, order_state, auto_delete):
+        payload = json.dumps({"action": "delete_all"})
+        return on_history_action(payload, images_state, order_state, auto_delete)
+
+    btn_save_session.click(_save_click, [images_state, order_state, auto_delete_cb], _hist_outs)
+    btn_refresh_history.click(_refresh_click, [images_state, order_state, auto_delete_cb], _hist_outs)
+    btn_delete_all_sessions.click(_delete_all_click, [images_state, order_state, auto_delete_cb], _hist_outs)
+    history_action_input.change(
+        on_history_action,
+        [history_action_input, images_state, order_state, auto_delete_cb],
+        _hist_outs,
     )
 
 

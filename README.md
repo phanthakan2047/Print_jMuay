@@ -14,14 +14,15 @@ license: mit
 
 ## Features
 - รองรับไฟล์ภาพหลายฟอร์แมต (.jpg, .png, .bmp, .tiff, .webp ...)
-- เรียงลำดับภาพด้วยปุ่ม ↑ ↓
+- เรียงลำดับภาพด้วยปุ่ม ↑ ↓ หรือลากเปลี่ยนลำดับใน Preview
 - ปรับ Sharpness / Contrast / Unsharp Mask
 - Export เป็น PDF, PNG (แนวตั้ง/แนวนอน), ZIP
-- สั่งพิมพ์โดยตรงจาก browser
+- สั่งพิมพ์โดยตรงจาก browser พร้อม Preview ก่อนพิมพ์
+- บันทึก/โหลด/ลบประวัติ sessions ผ่าน Supabase (สูงสุด 20 sessions)
 
 ## Setup (Supabase — optional)
 
-สร้าง table ใน Supabase ด้วย SQL นี้:
+สร้าง tables ใน Supabase ด้วย SQL นี้:
 
 ```sql
 create table file_history (
@@ -32,6 +33,15 @@ create table file_history (
   file_size_kb numeric(10,1),
   output_filename text,
   enhancements text
+);
+
+create table image_sessions (
+  id           bigserial primary key,
+  created_at   timestamptz default now(),
+  image_names  jsonb,
+  thumbnails   jsonb,
+  image_data   jsonb,
+  settings     jsonb
 );
 ```
 
