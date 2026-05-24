@@ -126,40 +126,94 @@ def _render_sortable_gallery_html(images: dict, order: list) -> str:
         return "<p style='color:#888;padding:20px;text-align:center;'>อัปโหลดภาพเพื่อดู Preview</p>"
     uid = abs(hash("gal" + str(order))) % 999999
     items = []
+    full_imgs: dict[str, str] = {}
+
     for i, name in enumerate(order):
         if name not in images:
             continue
-        thumb = images[name].copy()
+        img = images[name]
+        safe = name.replace('"', "&quot;").replace("'", "&#39;")
+
+        # Thumbnail for grid (small, fast)
+        thumb = img.copy()
         thumb.thumbnail((180, 180), Image.LANCZOS)
         buf = io.BytesIO()
-        prep_rgb(thumb).save(buf, format="JPEG", quality=70)
-        b64 = base64.b64encode(buf.getvalue()).decode()
-        safe = name.replace('"', "&quot;")
+        prep_rgb(thumb).save(buf, format="JPEG", quality=72)
+        thumb_b64 = base64.b64encode(buf.getvalue()).decode()
+
+        # Full image for lightbox (sharp, high quality)
+        full = img.copy()
+        full.thumbnail((900, 900), Image.LANCZOS)
+        buf = io.BytesIO()
+        prep_rgb(full).save(buf, format="JPEG", quality=92)
+        full_imgs[name] = base64.b64encode(buf.getvalue()).decode()
+
         items.append(
-            f'<div class="gi" data-name="{safe}" style="display:flex;flex-direction:column;'
-            f'align-items:center;cursor:grab;background:#1e2a3a;border-radius:8px;padding:6px;'
-            f'user-select:none;border:2px solid transparent;" '
+            f'<div class="gi" data-name="{safe}" '
+            f'style="display:flex;flex-direction:column;align-items:center;cursor:grab;'
+            f'background:#1e2a3a;border-radius:8px;padding:6px;user-select:none;'
+            f'border:2px solid transparent;" '
             f'onmouseenter="this.style.borderColor=\'#63b3ed\'" '
             f'onmouseleave="this.style.borderColor=\'transparent\'">'
-            f'<div style="background:#2d3e50;border-radius:4px;width:100%;text-align:center;'
-            f'font-size:11px;color:#63b3ed;padding:2px 4px;margin-bottom:4px;font-weight:bold;">{i+1}</div>'
-            f'<img src="data:image/jpeg;base64,{b64}" style="max-width:100%;max-height:140px;'
-            f'object-fit:contain;border-radius:4px;pointer-events:none;"/>'
+            f'<div class="n" style="background:#2d3e50;border-radius:4px;width:100%;'
+            f'text-align:center;font-size:11px;color:#63b3ed;padding:2px 4px;'
+            f'margin-bottom:4px;font-weight:bold;">{i+1}</div>'
+            f'<div style="position:relative;width:100%;text-align:center;">'
+            f'<img src="data:image/jpeg;base64,{thumb_b64}" '
+            f'style="max-width:100%;max-height:140px;object-fit:contain;border-radius:4px;'
+            f'pointer-events:none;display:block;margin:auto;"/>'
+            f'<button class="lb-btn" onclick="lbOpen_{uid}(\'{safe}\')" '
+            f'style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.72);'
+            f'color:white;border:none;border-radius:4px;padding:2px 7px;cursor:pointer;'
+            f'font-size:14px;line-height:1.4;" title="ดูภาพเต็ม">⛶</button>'
+            f'</div>'
             f'<div style="font-size:10px;color:#a0aec0;margin-top:4px;word-break:break-all;'
             f'text-align:center;width:100%;overflow:hidden;text-overflow:ellipsis;'
             f'white-space:nowrap;" title="{safe}">{name}</div>'
             f'</div>'
         )
+
     items_html = "".join(items)
-    return f"""<div id="gc{uid}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
-gap:8px;max-height:460px;overflow-y:auto;padding:4px;">{items_html}</div>
+    full_json = json.dumps(full_imgs)
+
+    return f"""
+<div id="lb{uid}" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.93);
+  z-index:99999;align-items:center;justify-content:center;flex-direction:column;">
+  <button onclick="document.getElementById('lb{uid}').style.display='none'"
+    style="position:absolute;top:14px;right:18px;background:rgba(255,255,255,0.15);
+    color:white;border:none;border-radius:50%;width:42px;height:42px;font-size:22px;
+    cursor:pointer;">✕</button>
+  <img id="lbi{uid}" style="max-width:92vw;max-height:88vh;object-fit:contain;
+    border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,0.9);image-rendering:high-quality;"/>
+  <div id="lbc{uid}" style="margin-top:10px;color:rgba(255,255,255,0.85);font-size:13px;
+    background:rgba(0,0,0,0.55);padding:4px 16px;border-radius:20px;
+    max-width:80vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+</div>
+<div id="gc{uid}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+  gap:8px;max-height:460px;overflow-y:auto;padding:4px;">{items_html}</div>
+<script type="application/json" id="fi{uid}">{full_json}</script>
 <img src="gi{uid}" onerror="(function(){{
+  var fi=JSON.parse(document.getElementById('fi{uid}').textContent);
+  window.lbOpen_{uid}=function(name){{
+    var b64=fi[name];if(!b64)return;
+    document.getElementById('lbi{uid}').src='data:image/jpeg;base64,'+b64;
+    var num=0;
+    document.querySelectorAll('#gc{uid} .gi').forEach(function(x,i){{if(x.dataset.name===name)num=i+1;}});
+    document.getElementById('lbc{uid}').textContent=num+'. '+name;
+    var lb=document.getElementById('lb{uid}');
+    lb.style.display='flex';
+    lb.onclick=function(e){{if(e.target===lb)lb.style.display='none';}};
+  }};
+  document.addEventListener('keydown',function(e){{
+    if(e.key==='Escape'){{var lb=document.getElementById('lb{uid}');if(lb)lb.style.display='none';}}
+  }});
   var go=function(){{
     var c=document.getElementById('gc{uid}');
     if(!c||c._s)return;c._s=true;
-    new Sortable(c,{{animation:150,draggable:'.gi',ghostClass:'sg2',onEnd:function(){{
+    new Sortable(c,{{animation:150,draggable:'.gi',ghostClass:'sg2',
+      filter:'.lb-btn',preventOnFilter:true,onEnd:function(){{
       var it=c.querySelectorAll('.gi');
-      it.forEach(function(x,i){{x.querySelector('div:first-child').textContent=i+1;}});
+      it.forEach(function(x,i){{x.querySelector('.n').textContent=i+1;}});
       var o=Array.from(it).map(function(x){{return x.dataset.name;}});
       var w=document.getElementById('sort_order_input');
       if(w){{var t=w.querySelector('textarea')||w.querySelector('input');
