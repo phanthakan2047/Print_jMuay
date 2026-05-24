@@ -2,7 +2,6 @@ import base64
 import io
 import json
 import os
-import tempfile
 import zipfile
 from pathlib import Path
 
@@ -178,34 +177,93 @@ def _render_sortable_gallery_html(images: dict, order: list) -> str:
 
     return f"""
 <div id="lb{uid}" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.93);
-  z-index:99999;align-items:center;justify-content:center;flex-direction:column;">
+  z-index:99999;align-items:center;justify-content:center;flex-direction:column;overflow:hidden;">
   <button onclick="document.getElementById('lb{uid}').style.display='none'"
     style="position:absolute;top:14px;right:18px;background:rgba(255,255,255,0.15);
     color:white;border:none;border-radius:50%;width:42px;height:42px;font-size:22px;
-    cursor:pointer;">✕</button>
-  <img id="lbi{uid}" style="max-width:92vw;max-height:88vh;object-fit:contain;
-    border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,0.9);image-rendering:high-quality;"/>
-  <div id="lbc{uid}" style="margin-top:10px;color:rgba(255,255,255,0.85);font-size:13px;
+    cursor:pointer;z-index:2;">✕</button>
+  <div style="position:absolute;top:14px;left:50%;transform:translateX(-50%);
+    display:flex;gap:6px;z-index:2;">
+    <button onclick="lbZoom_{uid}(1.3)"
+      style="background:rgba(255,255,255,0.15);color:white;border:none;border-radius:6px;
+      width:36px;height:36px;font-size:18px;cursor:pointer;">+</button>
+    <button onclick="lbZoom_{uid}(1/1.3)"
+      style="background:rgba(255,255,255,0.15);color:white;border:none;border-radius:6px;
+      width:36px;height:36px;font-size:18px;cursor:pointer;">−</button>
+    <button onclick="lbReset_{uid}()"
+      style="background:rgba(255,255,255,0.15);color:white;border:none;border-radius:6px;
+      padding:0 10px;height:36px;font-size:12px;cursor:pointer;">รีเซ็ต</button>
+    <span id="lbz{uid}" style="color:rgba(255,255,255,0.7);font-size:12px;
+      line-height:36px;min-width:40px;text-align:center;">100%</span>
+  </div>
+  <div id="lbw{uid}" style="overflow:hidden;width:92vw;height:88vh;display:flex;
+    align-items:center;justify-content:center;cursor:grab;">
+    <img id="lbi{uid}" style="max-width:92vw;max-height:88vh;object-fit:contain;
+      border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,0.9);
+      transform-origin:center;user-select:none;pointer-events:none;"/>
+  </div>
+  <div id="lbc{uid}" style="margin-top:8px;color:rgba(255,255,255,0.85);font-size:13px;
     background:rgba(0,0,0,0.55);padding:4px 16px;border-radius:20px;
-    max-width:80vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+    max-width:80vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;z-index:2;"></div>
 </div>
 <div id="gc{uid}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
   gap:8px;max-height:460px;overflow-y:auto;padding:4px;">{items_html}</div>
 <script type="application/json" id="fi{uid}">{full_json}</script>
 <img src="gi{uid}" onerror="(function(){{
   var fi=JSON.parse(document.getElementById('fi{uid}').textContent);
+  var _sc{uid}=1,_tx{uid}=0,_ty{uid}=0,_drag{uid}=false,_sx{uid}=0,_sy{uid}=0;
+  function _applyT{uid}(){{
+    var img=document.getElementById('lbi{uid}');
+    img.style.transform='scale('+_sc{uid}+') translate('+_tx{uid}/_sc{uid}+'px,'+_ty{uid}/_sc{uid}+'px)';
+    document.getElementById('lbz{uid}').textContent=Math.round(_sc{uid}*100)+'%';
+    var w=document.getElementById('lbw{uid}');
+    w.style.cursor=_sc{uid}>1?'grab':'default';
+  }}
+  window.lbZoom_{uid}=function(f){{_sc{uid}=Math.min(8,Math.max(0.5,_sc{uid}*f));_applyT{uid}();}};
+  window.lbReset_{uid}=function(){{_sc{uid}=1;_tx{uid}=0;_ty{uid}=0;_applyT{uid}();}};
+  var lbw=document.getElementById('lbw{uid}');
+  lbw.addEventListener('wheel',function(e){{
+    e.preventDefault();
+    _sc{uid}=Math.min(8,Math.max(0.5,_sc{uid}*(e.deltaY<0?1.15:0.87)));
+    _applyT{uid}();
+  }},{{passive:false}});
+  lbw.addEventListener('mousedown',function(e){{
+    if(_sc{uid}<=1)return;
+    _drag{uid}=true;_sx{uid}=e.clientX-_tx{uid};_sy{uid}=e.clientY-_ty{uid};
+    lbw.style.cursor='grabbing';e.preventDefault();
+  }});
+  window.addEventListener('mousemove',function(e){{
+    if(!_drag{uid})return;
+    _tx{uid}=e.clientX-_sx{uid};_ty{uid}=e.clientY-_sy{uid};_applyT{uid}();
+  }});
+  window.addEventListener('mouseup',function(){{
+    _drag{uid}=false;
+    if(document.getElementById('lbw{uid}'))
+      document.getElementById('lbw{uid}').style.cursor=_sc{uid}>1?'grab':'default';
+  }});
+  document.getElementById('lbi{uid}').addEventListener('dblclick',function(){{
+    if(_sc{uid}>1){{_sc{uid}=1;_tx{uid}=0;_ty{uid}=0;}}else{{_sc{uid}=2;}}
+    _applyT{uid}();
+  }});
   window.lbOpen_{uid}=function(name){{
     var b64=fi[name];if(!b64)return;
-    document.getElementById('lbi{uid}').src='data:image/jpeg;base64,'+b64;
+    _sc{uid}=1;_tx{uid}=0;_ty{uid}=0;
+    var img=document.getElementById('lbi{uid}');
+    img.src='data:image/jpeg;base64,'+b64;
+    img.style.transform='';
+    document.getElementById('lbz{uid}').textContent='100%';
     var num=0;
     document.querySelectorAll('#gc{uid} .gi').forEach(function(x,i){{if(x.dataset.name===name)num=i+1;}});
     document.getElementById('lbc{uid}').textContent=num+'. '+name;
     var lb=document.getElementById('lb{uid}');
     lb.style.display='flex';
-    lb.onclick=function(e){{if(e.target===lb)lb.style.display='none';}};
+    lb.onclick=function(e){{if(e.target===lb||e.target===lbw)lbReset_{uid}(),lb.style.display='none';}};
   }};
   document.addEventListener('keydown',function(e){{
-    if(e.key==='Escape'){{var lb=document.getElementById('lb{uid}');if(lb)lb.style.display='none';}}
+    if(e.key==='Escape'){{
+      var lb=document.getElementById('lb{uid}');
+      if(lb&&lb.style.display!='none'){{lbReset_{uid}();lb.style.display='none';}}
+    }}
   }});
   var go=function(){{
     var c=document.getElementById('gc{uid}');
@@ -294,7 +352,7 @@ def remove_image(selected, images_state, order_state):
 
 
 def clear_all():
-    return {}, [], _render_sortable_html([]), _render_sortable_gallery_html({}, []), gr.update(choices=[], value=None), None, ""
+    return {}, [], _render_sortable_html([]), _render_sortable_gallery_html({}, []), gr.update(choices=[], value=None), "", ""
 
 
 def generate(
@@ -411,11 +469,46 @@ def generate(
 
     _save_to_db(output_format, len(imgs), size_kb, fname, enh_str)
 
-    out_path = os.path.join(tempfile.gettempdir(), f"{fname}.{ext}")
-    with open(out_path, "wb") as fout:
-        fout.write(data)
+    mime_map = {"pdf": "application/pdf", "png": "image/png", "zip": "application/zip"}
+    mime = mime_map[ext]
+    b64_file = base64.b64encode(data).decode()
 
-    return out_path, f"<p style='color:#276749;font-weight:600;'>{msg} ({size_kb:.0f} KB)</p>"
+    # Build result preview HTML
+    if ext in ("png",):
+        prev = canvas.copy()
+        prev.thumbnail((700, 700), Image.LANCZOS)
+        pbuf = io.BytesIO()
+        prev.save(pbuf, format="JPEG", quality=82)
+        prev_b64 = base64.b64encode(pbuf.getvalue()).decode()
+        preview_html = (
+            f"<p style='color:#888;font-size:12px;margin:4px 0;'>ตัวอย่างผลลัพธ์:</p>"
+            f"<img src='data:image/jpeg;base64,{prev_b64}' "
+            f"style='max-width:100%;border-radius:8px;border:1px solid #2d3e50;'/>"
+        )
+    elif ext == "pdf":
+        prev = pdf_imgs[0].copy()
+        prev.thumbnail((600, 600), Image.LANCZOS)
+        pbuf = io.BytesIO()
+        prev.save(pbuf, format="JPEG", quality=82)
+        prev_b64 = base64.b64encode(pbuf.getvalue()).decode()
+        preview_html = (
+            f"<p style='color:#888;font-size:12px;margin:4px 0;'>ตัวอย่างหน้า 1/{len(pdf_imgs)}:</p>"
+            f"<img src='data:image/jpeg;base64,{prev_b64}' "
+            f"style='max-width:100%;border-radius:8px;border:1px solid #2d3e50;'/>"
+        )
+    else:
+        rows = "".join(f"<li style='font-size:12px;color:#a0aec0;'>{n}</li>" for n in names)
+        preview_html = f"<p style='color:#888;font-size:12px;margin:4px 0;'>ไฟล์ใน ZIP:</p><ul style='margin:4px 0;padding-left:18px;'>{rows}</ul>"
+
+    status_html = f"""
+<p style='color:#276749;font-weight:600;margin-bottom:8px;'>{msg} ({size_kb:.0f} KB)</p>
+<a href="data:{mime};base64,{b64_file}" download="{fname}.{ext}"
+   style="display:inline-block;padding:11px 28px;background:#276749;color:white;
+   text-decoration:none;border-radius:8px;font-weight:bold;font-size:15px;">
+   📥 ดาวน์โหลด {fname}.{ext}
+</a>"""
+
+    return status_html, preview_html
 
 
 def make_print_html(images_state, order_state, print_paper, print_orient, print_quality):
@@ -552,7 +645,7 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
 
             btn_generate = gr.Button("🔄 สร้างไฟล์", variant="primary", size="lg")
             status_html = gr.HTML()
-            output_file = gr.File(label="📥 ดาวน์โหลดไฟล์")
+            preview_result = gr.HTML()
 
             gr.Markdown("---")
             gr.Markdown("### 🖨️ สั่งพิมพ์")
@@ -588,7 +681,7 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
     )
     btn_clear.click(
         clear_all, [],
-        [images_state, order_state, order_html, gallery, select_img, output_file, status_html],
+        [images_state, order_state, order_html, gallery, select_img, status_html, preview_result],
     )
 
     btn_generate.click(
@@ -602,7 +695,7 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
             max_dim, compress_level, bg_color,
             zip_quality,
         ],
-        [output_file, status_html],
+        [status_html, preview_result],
     )
 
     btn_print_prep.click(
