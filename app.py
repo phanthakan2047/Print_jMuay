@@ -588,36 +588,33 @@ def make_print_html(images_state, order_state, print_paper, print_orient, print_
     orient_css = "portrait" if print_orient == "แนวตั้ง" else "landscape"
     uid = abs(hash(str([n for n, _ in ordered]))) % 999999
 
+    # Use mm dimensions so page-break-after works correctly (vw/vh break with position:fixed)
+    mm = {"A4": (210, 297), "A3": (297, 420), "Letter": (216, 279)}
+    pw_mm, ph_mm = mm.get(print_paper, (210, 297))
+    if print_orient == "แนวนอน":
+        pw_mm, ph_mm = ph_mm, pw_mm
+
     pages_html = "".join(
-        f'<div class="prp"><img src="data:image/jpeg;base64,{b64}"/></div>'
+        f'<div class="prp{uid}"><img src="data:image/jpeg;base64,{b64}"/></div>'
         for b64 in img_b64s
     )
 
-    # Strategy: inject a hidden overlay into the current page.
-    # @media print CSS hides ALL Gradio UI and shows only our overlay.
-    # window.print() is called directly — no popup, no new tab, no blocker.
-    # onafterprint hides the overlay again when printing is done.
+    # onclick: move overlay to direct body child → CSS body.prnt{uid} > *:not(overlay)
+    # hides all Gradio UI → page-break works in normal block flow → one image per page.
+    # onafterprint moves overlay back and removes class.
     return f"""<style>
 @page{{size:{print_paper} {orient_css};margin:0}}
 @media print{{
-  body *{{visibility:hidden!important;margin:0!important;padding:0!important}}
-  #pro{uid},#pro{uid} *{{visibility:visible!important}}
-  #pro{uid}{{
-    position:fixed!important;top:0!important;left:0!important;
-    width:100vw!important;height:auto!important;
-    background:white!important;z-index:2147483647!important;
+  body.prnt{uid}>*:not(#pro{uid}){{display:none!important}}
+  .prp{uid}{{
+    width:{pw_mm}mm!important;height:{ph_mm}mm!important;
+    display:flex!important;align-items:center!important;
+    justify-content:center!important;overflow:hidden!important;
+    background:white!important;page-break-after:always!important;
   }}
-  #pro{uid} .prp{{page-break-after:always!important}}
-  #pro{uid} .prp:last-child{{page-break-after:auto!important}}
-}}
-#pro{uid} .prp{{
-  width:100vw;height:100vh;
-  display:flex;align-items:center;justify-content:center;
-  overflow:hidden;background:white;
-}}
-#pro{uid} .prp img{{
-  max-width:100%;max-height:100%;
-  object-fit:contain;display:block;
+  .prp{uid}:last-child{{page-break-after:auto!important}}
+  .prp{uid} img{{max-width:100%!important;max-height:100%!important;
+    object-fit:contain!important;display:block!important}}
 }}
 </style>
 <div id="pro{uid}" style="display:none;">{pages_html}</div>
@@ -625,7 +622,7 @@ def make_print_html(images_state, order_state, print_paper, print_orient, print_
   <p style="color:#68d391;font-weight:700;margin-bottom:10px;text-align:center;font-size:14px;">
     ✅ เตรียมพร้อมแล้ว {len(ordered)} ภาพ &nbsp;|&nbsp; {print_paper} · {orient_css}
   </p>
-  <button onclick="var o=document.getElementById('pro{uid}');o.style.display='block';var done=function(){{o.style.display='none';window.onafterprint=null;}};window.onafterprint=done;setTimeout(done,180000);window.print();"
+  <button onclick="var o=document.getElementById('pro{uid}'),op=o.parentNode,ns=o.nextSibling;document.body.appendChild(o);o.style.display='block';document.body.classList.add('prnt{uid}');var done=function(){{document.body.classList.remove('prnt{uid}');o.style.display='none';try{{ns?op.insertBefore(o,ns):op.appendChild(o);}}catch(e){{}}window.onafterprint=null;}};window.onafterprint=done;setTimeout(done,180000);window.print();"
     style="width:100%;padding:14px;background:#1a56a0;color:white;border:none;
     border-radius:8px;font-size:15px;font-weight:bold;cursor:pointer;
     margin-bottom:10px;display:block;text-align:center;">
@@ -634,7 +631,7 @@ def make_print_html(images_state, order_state, print_paper, print_orient, print_
   <div style="font-size:11px;color:#a0aec0;line-height:1.9;">
     <p>① กดปุ่มด้านบน → กล่องเลือกเครื่องพิมพ์เปิดขึ้นทันที</p>
     <p>② เลือกเครื่องพิมพ์ → กด <b style="color:#e2e8f0;">พิมพ์</b></p>
-    <p>③ ทีละ 1 ภาพต่อหน้า จัดให้เต็มพื้นที่กระดาษอัตโนมัติ</p>
+    <p>③ ทีละ 1 ภาพต่อหน้า จัดให้เต็มพื้นที่กระดาษ</p>
   </div>
 </div>"""
 
