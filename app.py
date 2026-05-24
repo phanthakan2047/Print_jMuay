@@ -65,11 +65,11 @@ def _render_order_html(order: list) -> str:
         return "<p style='color:#888;padding:8px;'>ยังไม่มีภาพ</p>"
     rows = "".join(
         f'<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;margin:2px 0;'
-        f'background:#f0f4f8;border-radius:6px;border-left:3px solid #1f4e79;font-size:13px;">'
-        f'<span style="background:#1f4e79;color:white;border-radius:50%;min-width:22px;height:22px;'
+        f'background:#1e3a5f;border-radius:6px;border-left:3px solid #63b3ed;font-size:13px;">'
+        f'<span style="background:#63b3ed;color:#0a1628;border-radius:50%;min-width:22px;height:22px;'
         f'display:inline-flex;align-items:center;justify-content:center;font-weight:bold;font-size:11px;">'
         f'{i+1}</span>'
-        f'<span style="flex:1;word-break:break-all;">{name}</span>'
+        f'<span style="flex:1;word-break:break-all;color:#e2e8f0;">{name}</span>'
         f'</div>'
         for i, name in enumerate(order)
     )
