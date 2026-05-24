@@ -229,6 +229,16 @@ def apply_enhancements(img, sharpness, contrast, use_unsharp,
     return img
 
 
+def _rm_onclick(name: str) -> str:
+    safe = name.replace("\\", "\\\\").replace("'", "\\'")
+    return (
+        "(function(){var w=document.getElementById('remove_img_input');"
+        "if(w){var t=w.querySelector('textarea')||w.querySelector('input');"
+        "if(t){t.value='" + safe + "';"
+        "t.dispatchEvent(new Event('input',{bubbles:true}));}}})()"
+    )
+
+
 def _render_sortable_html(order: list) -> str:
     if not order:
         return "<p style='color:#888;padding:8px;'>ยังไม่มีภาพ</p>"
@@ -242,7 +252,7 @@ def _render_sortable_html(order: list) -> str:
         f'min-width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;'
         f'font-weight:bold;font-size:11px;flex-shrink:0;">{i+1}</span>'
         f'<span style="color:#e2e8f0;flex:1;word-break:break-all;font-size:13px;">☰ {name}</span>'
-        f'<button class="rm-btn" onclick="rmImgS_{uid}(this)"'
+        f'<button class="rm-btn" onclick="{_rm_onclick(name)}"'
         f' style="background:rgba(180,30,30,0.85);color:white;border:none;border-radius:4px;'
         f'padding:1px 8px;cursor:pointer;font-size:15px;line-height:1.4;flex-shrink:0;"'
         f' title="ลบภาพนี้">✕</button>'
@@ -252,12 +262,6 @@ def _render_sortable_html(order: list) -> str:
     return f"""<div id="sc{uid}" style="max-height:300px;overflow-y:auto;padding:2px;">{items}</div>
 <style>.sg{{opacity:.5;background:#2d5a8e!important;}}</style>
 <img src="x{uid}" onerror="(function(){{
-  window.rmImgS_{uid}=function(el){{
-    var n=el.closest('[data-name]').dataset.name;
-    var w=document.getElementById('remove_img_input');
-    if(w){{var t=w.querySelector('textarea')||w.querySelector('input');
-      if(t){{t.value=n;t.dispatchEvent(new Event('input',{{bubbles:true}}));}}}}
-  }};
   var go=function(){{
     var c=document.getElementById('sc{uid}');
     if(!c||c._s)return;c._s=true;
@@ -345,7 +349,7 @@ def _render_sortable_gallery_html(images: dict, order: list) -> str:
             f'style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.72);'
             f'color:white;border:none;border-radius:4px;padding:2px 7px;cursor:pointer;'
             f'font-size:14px;line-height:1.4;" title="ดูภาพเต็ม">⛶</button>'
-            f'<button class="rm-btn" onclick="rmImg_{uid}(this)" '
+            f'<button class="rm-btn" onclick="{_rm_onclick(name)}" '
             f'style="position:absolute;top:2px;left:2px;background:rgba(180,30,30,0.85);'
             f'color:white;border:none;border-radius:4px;padding:2px 7px;cursor:pointer;'
             f'font-size:14px;line-height:1.4;" title="ลบภาพนี้">✕</button>'
@@ -405,12 +409,6 @@ def _render_sortable_gallery_html(images: dict, order: list) -> str:
   gap:8px;max-height:460px;overflow-y:auto;padding:4px;">{items_html}</div>
 <script type="application/json" id="fi{uid}">{full_json}</script>
 <img src="gi{uid}" onerror="(function(){{
-  window.rmImg_{uid}=function(el){{
-    var n=el.closest('[data-name]').dataset.name;
-    var w=document.getElementById('remove_img_input');
-    if(w){{var t=w.querySelector('textarea')||w.querySelector('input');
-      if(t){{t.value=n;t.dispatchEvent(new Event('input',{{bubbles:true}}));}}}}
-  }};
   var fd=JSON.parse(document.getElementById('fi{uid}').textContent);
   var _names{uid}=fd.names,_fi{uid}=fd.imgs;
   var _sc{uid}=1,_tx{uid}=0,_ty{uid}=0,_drag{uid}=false,_sx{uid}=0,_sy{uid}=0,_idx{uid}=0;
