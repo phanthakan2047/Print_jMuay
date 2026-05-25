@@ -662,12 +662,26 @@ def generate(
     zip_quality,
     auto_delete,
 ):
+    _no_hist = (gr.update(), gr.update())   # placeholder for history outputs
+
     if not images_state or not order_state:
-        return None, "<p style='color:#c53030'>⚠️ ยังไม่มีภาพ กรุณาอัปโหลดก่อน</p>"
+        return (
+            "<div style='background:#2d1a00;border:1px solid #c05621;border-radius:8px;"
+            "padding:12px 16px;'><p style='color:#f6ad55;font-weight:700;margin:0;font-size:15px;'>"
+            "⚠️ กรุณาอัปโหลดภาพอย่างน้อย 1 ไฟล์ก่อนสร้างไฟล์</p></div>",
+            "",
+            *_no_hist,
+        )
 
     ordered = [(n, images_state[n]) for n in order_state if n in images_state]
     if not ordered:
-        return None, "<p style='color:#c53030'>⚠️ ไม่มีภาพ</p>"
+        return (
+            "<div style='background:#2d1a00;border:1px solid #c05621;border-radius:8px;"
+            "padding:12px 16px;'><p style='color:#f6ad55;font-weight:700;margin:0;'>"
+            "⚠️ ไม่มีภาพในรายการ กรุณาอัปโหลดใหม่</p></div>",
+            "",
+            *_no_hist,
+        )
 
     names = [n for n, _ in ordered]
     imgs = [
@@ -1218,8 +1232,12 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
 
     # Auto-load history when page opens (no refresh button needed)
     def _auto_load():
-        sessions = _load_sessions()
-        return _render_history_html(sessions), gr.update(choices=_sessions_to_choices(sessions))
+        try:
+            sessions = _load_sessions()
+        except Exception:
+            sessions = []
+        choices = _sessions_to_choices(sessions)
+        return _render_history_html(sessions), gr.update(choices=choices, value=None)
 
     demo.load(_auto_load, inputs=[], outputs=[history_html_out, session_select_dd])
 
