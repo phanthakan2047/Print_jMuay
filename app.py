@@ -18,17 +18,21 @@ except Exception:
     db = None
 
 
-def _save_to_db(fmt: str, count: int, size_kb: float, filename: str, enhancements: str) -> None:
+def _save_to_db(fmt: str, count: int, size_kb: float, filename: str,
+                enhancements: str, session_id: int | None = None) -> None:
     if not db:
         return
     try:
-        db.table("file_history").insert({
+        row: dict = {
             "output_format": fmt,
             "image_count": count,
             "file_size_kb": round(size_kb, 1),
             "output_filename": filename,
             "enhancements": enhancements,
-        }).execute()
+        }
+        if session_id is not None:
+            row["session_id"] = session_id   # FK to image_sessions.id
+        db.table("file_history").insert(row).execute()
     except Exception:
         pass
 
@@ -81,22 +85,33 @@ def _session_count() -> int:
         return 0
 
 
-def _save_session(images: dict, order: list, settings: dict, auto_delete: bool) -> str:
+def _save_session(images: dict, order: list, settings: dict,
+                  auto_delete: bool) -> tuple[str, int | None]:
+    """Returns (message, session_id). session_id is None on failure."""
     if not db:
-        return "⚠️ ไม่ได้เชื่อมต่อ Supabase"
+        return "⚠️ ไม่ได้เชื่อมต่อ Supabase", None
     count = _session_count()
     if count >= SESSION_LIMIT:
         if auto_delete:
             try:
-                oldest = db.table("image_sessions").select("id").order("created_at").limit(1).execute()
+                oldest = (db.table("image_sessions")
+                          .select("id,file_history(id)")
+                          .order("created_at").limit(1).execute())
                 if oldest.data:
-                    db.table("image_sessions").delete().eq("id", oldest.data[0]["id"]).execute()
+                    old_id = oldest.data[0]["id"]
+                    # cascade-delete file_history rows linked to this session
+                    try:
+                        db.table("file_history").delete().eq("session_id", old_id).execute()
+                    except Exception:
+                        pass
+                    db.table("image_sessions").delete().eq("id", old_id).execute()
             except Exception:
                 pass
         else:
-            return f"⚠️ ประวัติเต็มแล้ว ({SESSION_LIMIT} sessions) กรุณาลบประวัติเก่าก่อนบันทึก"
-    thumbnails = {}
-    image_data = {}
+            return (f"⚠️ ประวัติเต็มแล้ว ({SESSION_LIMIT} sessions) "
+                    f"กรุณาลบประวัติเก่าก่อนบันทึก"), None
+    thumbnails: dict = {}
+    image_data: dict = {}
     for name in order:
         if name not in images:
             continue
@@ -110,17 +125,18 @@ def _save_session(images: dict, order: list, settings: dict, auto_delete: bool) 
         prep_rgb(img).save(buf2, format="JPEG", quality=92)
         image_data[name] = base64.b64encode(buf2.getvalue()).decode()
     try:
-        db.table("image_sessions").insert({
+        res = db.table("image_sessions").insert({
             "image_names": order,
             "thumbnails": thumbnails,
             "image_data": image_data,
             "settings": settings,
         }).execute()
+        session_id: int | None = res.data[0]["id"] if res.data else None
         new_count = _session_count()
         warn = f" ⚠️ ใกล้เต็ม ({new_count}/{SESSION_LIMIT})" if new_count >= SESSION_LIMIT - 3 else ""
-        return f"✅ บันทึกแล้ว ({len(order)} ภาพ){warn}"
+        return f"✅ บันทึกแล้ว ({len(order)} ภาพ){warn}", session_id
     except Exception as e:
-        return f"❌ บันทึกไม่สำเร็จ: {e}"
+        return f"❌ บันทึกไม่สำเร็จ: {e}", None
 
 
 def _load_sessions() -> list:
@@ -164,8 +180,13 @@ def _delete_session(sid: int) -> str:
     if not db:
         return "⚠️ ไม่ได้เชื่อมต่อ Supabase"
     try:
+        # Delete linked file_history rows first (FK child before parent)
+        try:
+            db.table("file_history").delete().eq("session_id", sid).execute()
+        except Exception:
+            pass  # column may not exist yet — skip gracefully
         db.table("image_sessions").delete().eq("id", sid).execute()
-        return "✅ ลบแล้ว"
+        return "✅ ลบแล้ว (session + ประวัติที่เชื่อมโยง)"
     except Exception as e:
         return f"❌ ลบไม่สำเร็จ: {e}"
 
@@ -174,8 +195,13 @@ def _delete_all_sessions() -> str:
     if not db:
         return "⚠️ ไม่ได้เชื่อมต่อ Supabase"
     try:
+        # Delete file_history first (child), then image_sessions (parent)
+        try:
+            db.table("file_history").delete().neq("id", 0).execute()
+        except Exception:
+            pass
         db.table("image_sessions").delete().neq("id", 0).execute()
-        return "✅ ลบประวัติทั้งหมดแล้ว"
+        return "✅ ลบประวัติทั้งหมดแล้ว (image_sessions + file_history)"
     except Exception as e:
         return f"❌ ลบไม่สำเร็จ: {e}"
 
@@ -739,7 +765,9 @@ def generate(
     data = buf.getvalue()
     size_kb = len(data) / 1024
 
-    _save_to_db(output_format, len(imgs), size_kb, fname, enh_str)
+    # Save session first → get session_id → link file_history to it
+    _, session_id = _save_session(images_state, order_state, {}, bool(auto_delete))
+    _save_to_db(output_format, len(imgs), size_kb, fname, enh_str, session_id=session_id)
 
     mime_map = {"pdf": "application/pdf", "png": "image/png", "zip": "application/zip"}
     mime = mime_map[ext]
@@ -801,8 +829,6 @@ def generate(
             f"<p style='color:#888;font-size:12px;margin:4px 0 8px;'>ไฟล์ใน ZIP ({len(names)} ไฟล์):</p>"
             f"<div style='{_grid}'>" + "".join(thumb_items) + "</div>"
         )
-
-    _save_session(images_state, order_state, {}, bool(auto_delete))
 
     # Refresh history for auto-update (no manual refresh needed)
     _sessions = _load_sessions()
@@ -941,7 +967,7 @@ def on_history_action(action_json, images_state, order_state, auto_delete):
         if not images_state:
             return gr.update(), history_html, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update()
         try:
-            msg = _save_session(images_state, order_state or [], settings, bool(auto_delete))
+            msg, _ = _save_session(images_state, order_state or [], settings, bool(auto_delete))
         except Exception as e:
             msg = f"❌ บันทึกไม่สำเร็จ: {e}"
         try:
