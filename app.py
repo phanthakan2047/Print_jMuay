@@ -804,6 +804,11 @@ def generate(
 
     _save_session(images_state, order_state, {}, bool(auto_delete))
 
+    # Refresh history for auto-update (no manual refresh needed)
+    _sessions = _load_sessions()
+    new_history_html = _render_history_html(_sessions)
+    new_session_choices = gr.update(choices=_sessions_to_choices(_sessions))
+
     status_html = (
         f"<p style='color:#276749;font-weight:600;margin-bottom:8px;'>{msg} ({size_kb:.0f} KB)</p>"
         f"<a id='dl_link' href='data:{mime};base64,{b64_file}' style='display:none'>.</a>"
@@ -822,7 +827,7 @@ def generate(
         "📥 ดาวน์โหลด</button></div>"
     )
 
-    return status_html, preview_html
+    return status_html, preview_html, new_history_html, new_session_choices
 
 
 def make_print_html(images_state, order_state, print_paper, print_orient, print_quality):
@@ -1126,7 +1131,7 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
             zip_quality,
             auto_delete_cb,
         ],
-        [status_html, preview_result],
+        [status_html, preview_result, history_html_out, session_select_dd],
     )
 
     btn_print_prep.click(
@@ -1184,6 +1189,13 @@ with gr.Blocks(title="🖼️ รวมภาพ | Image Merger", css=CSS, theme
         return (status, _render_history_html(sessions),
                 gr.update(choices=choices, value=None),
                 gr.update(), gr.update(), gr.update(), gr.update(), gr.update(), gr.update())
+
+    # Auto-load history when page opens (no refresh button needed)
+    def _auto_load():
+        sessions = _load_sessions()
+        return _render_history_html(sessions), gr.update(choices=_sessions_to_choices(sessions))
+
+    demo.load(_auto_load, inputs=[], outputs=[history_html_out, session_select_dd])
 
     btn_refresh_history.click(_refresh_click, [images_state, order_state, auto_delete_cb], _hist_outs)
     btn_delete_all_sessions.click(_delete_all_click, [auto_delete_cb], _hist_outs)
